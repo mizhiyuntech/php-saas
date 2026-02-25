@@ -6,6 +6,7 @@ useHead({ title: '在线注入' })
 
 const languages = ref<any[]>([])
 const selectedLanguage = ref('')
+const selectedFramework = ref('')
 const selectedFile = ref<File | null>(null)
 const uploading = ref(false)
 const fileName = ref('')
@@ -15,11 +16,28 @@ const licenseKey = ref('')
 const programId = ref('')
 const serverUrl = ref('')
 
+const phpFrameworks = [
+  { label: '原生PHP（无框架）', value: 'native' },
+  { label: 'Laravel', value: 'laravel' },
+  { label: 'ThinkPHP', value: 'thinkphp' },
+  { label: 'Yii', value: 'yii' },
+  { label: 'Symfony', value: 'symfony' },
+  { label: 'CodeIgniter', value: 'codeigniter' },
+  { label: 'Slim', value: 'slim' },
+  { label: 'Hyperf', value: 'hyperf' },
+  { label: 'Webman', value: 'webman' },
+  { label: 'Workerman', value: 'workerman' }
+]
+
 onMounted(async () => {
   const res = await get('/api/injection/languages')
   if (res.code === 0) {
     languages.value = (res.data || []).map((l: any) => ({ label: l.label, value: l.value }))
   }
+})
+
+watch(selectedLanguage, () => {
+  selectedFramework.value = ''
 })
 
 function onFileSelect(event: Event) {
@@ -44,6 +62,10 @@ async function handleInject() {
     toast.add({ title: '请先选择开发语言', color: 'error' })
     return
   }
+  if (selectedLanguage.value === 'php' && !selectedFramework.value) {
+    toast.add({ title: '请选择PHP框架', color: 'error' })
+    return
+  }
   if (!selectedFile.value) {
     toast.add({ title: '请上传ZIP文件', color: 'error' })
     return
@@ -61,6 +83,10 @@ async function handleInject() {
     formData.append('file', selectedFile.value)
     formData.append('language', selectedLanguage.value)
 
+    if (selectedLanguage.value === 'php' && selectedFramework.value) {
+      formData.append('framework', selectedFramework.value)
+    }
+
     if (injectLicense.value) {
       formData.append('inject_license', 'true')
       formData.append('license_key', licenseKey.value)
@@ -74,9 +100,7 @@ async function handleInject() {
 
     const response = await fetch(`${baseURL}/api/injection/upload`, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${authStore.token}`
-      },
+      headers: { 'Authorization': `Bearer ${authStore.token}` },
       body: formData
     })
 
@@ -119,7 +143,7 @@ function clearFile() {
       <div class="space-y-6">
         <UAlert
           title="使用说明"
-          description="上传程序ZIP包并选择开发语言，系统将自动注入授权验证SDK并修改入口文件。注入后的程序启动时会进行授权校验，未授权则显示激活页面。SDK文件夹已做伪装处理，变量及通信均已加密。"
+          description="上传程序ZIP包并选择开发语言，系统将自动注入授权验证SDK并修改入口文件。注入后的程序启动时会进行授权校验，未授权则显示激活页面。"
           color="info"
           variant="subtle"
         />
@@ -133,15 +157,32 @@ function clearFile() {
           />
         </UFormField>
 
+        <!-- PHP framework selection -->
+        <UFormField v-if="selectedLanguage === 'php'" label="选择PHP框架" required>
+          <USelect
+            v-model="selectedFramework"
+            :items="phpFrameworks"
+            value-key="value"
+            placeholder="请选择使用的PHP框架"
+          />
+        </UFormField>
+
+        <!-- Go source code warning -->
+        <UAlert
+          v-if="selectedLanguage === 'go'"
+          title="Go语言注意事项"
+          description="请上传Go项目的源代码压缩包，不要上传编译后的二进制文件。注入需要修改源码中的 main.go 文件，编译后的程序无法进行注入操作。上传后请重新编译项目以使授权验证生效。"
+          color="warning"
+          variant="subtle"
+        />
+
         <UFormField label="上传程序包" required hint="仅支持ZIP格式，最大30MB">
           <div class="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 text-center">
             <template v-if="!fileName">
               <UIcon name="i-lucide-upload" class="w-8 h-8 text-gray-400 mx-auto mb-2" />
               <p class="text-sm text-gray-500 mb-2">点击选择ZIP文件</p>
               <label>
-                <UButton variant="outline" color="neutral" as="span" class="cursor-pointer">
-                  选择文件
-                </UButton>
+                <UButton variant="outline" color="neutral" as="span" class="cursor-pointer">选择文件</UButton>
                 <input type="file" accept=".zip" class="hidden" @change="onFileSelect" />
               </label>
             </template>
@@ -155,16 +196,15 @@ function clearFile() {
           </div>
         </UFormField>
 
-        <!-- License injection toggle -->
+        <!-- License injection -->
         <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-4">
           <div class="flex items-center justify-between">
             <div>
               <p class="text-sm font-medium text-gray-700 dark:text-gray-300">注入许可证</p>
-              <p class="text-xs text-gray-500 mt-0.5">如果程序有商业需求，可预填授权信息一起注入。许可证内容以加密形式存储，不影响程序运行</p>
+              <p class="text-xs text-gray-500 mt-0.5">预填授权信息，加密注入程序中，启动时自动验证</p>
             </div>
             <USwitch v-model="injectLicense" />
           </div>
-
           <template v-if="injectLicense">
             <UFormField label="授权码" required>
               <UInput v-model="licenseKey" placeholder="XXXX-XXXX-XXXX-XXXX" />
@@ -175,12 +215,6 @@ function clearFile() {
             <UFormField label="授权服务器地址" required>
               <UInput v-model="serverUrl" placeholder="https://your-auth-server.com" />
             </UFormField>
-            <UAlert
-              title="提示"
-              description="填写的许可证信息将以XOR加密+HMAC签名的形式写入程序的 .lic 文件，程序启动时自动读取并验证，无需用户手动输入授权码。"
-              color="info"
-              variant="subtle"
-            />
           </template>
         </div>
 
@@ -188,35 +222,11 @@ function clearFile() {
           block
           size="lg"
           :loading="uploading"
-          :disabled="!selectedLanguage || !selectedFile"
+          :disabled="!selectedLanguage || !selectedFile || (selectedLanguage === 'php' && !selectedFramework)"
           @click="handleInject"
         >
           开始注入
         </UButton>
-      </div>
-    </UCard>
-
-    <UCard>
-      <template #header>
-        <span class="font-medium text-gray-900 dark:text-white">注入机制说明</span>
-      </template>
-      <div class="text-sm text-gray-600 dark:text-gray-400 space-y-3">
-        <div>
-          <p class="font-medium text-gray-700 dark:text-gray-300 mb-1">SDK伪装</p>
-          <p>授权验证文件隐藏在 lib/.cache/ 目录下，文件名伪装为框架引导文件（bootstrap.*），不易被识别</p>
-        </div>
-        <div>
-          <p class="font-medium text-gray-700 dark:text-gray-300 mb-1">自动引入</p>
-          <p>系统会自动扫描程序入口文件（如 index.php / app.js / main.py 等），注入SDK引用代码，无需手动修改</p>
-        </div>
-        <div>
-          <p class="font-medium text-gray-700 dark:text-gray-300 mb-1">许可证注入</p>
-          <p>可选择预填授权信息，注入后生成加密的 .lic 文件。程序启动时自动读取验证，用户无感知。不勾选则用户需手动激活</p>
-        </div>
-        <div>
-          <p class="font-medium text-gray-700 dark:text-gray-300 mb-1">安全校验</p>
-          <p>采用 XOR 加密存储配置、HMAC-SHA256 签名通信、时间戳防重放，授权信息加密存储于 .lic 文件</p>
-        </div>
       </div>
     </UCard>
   </div>

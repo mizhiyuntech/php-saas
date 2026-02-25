@@ -317,6 +317,9 @@ func completeOrder(orderNo, tradeNo string) {
 		config.DB.First(&pkg, *order.PackageID)
 	}
 
+	var program models.Program
+	config.DB.First(&program, order.ProgramID)
+
 	license := models.License{
 		ProgramID:  order.ProgramID,
 		LicenseKey: utils.GenerateLicenseKey(),
@@ -333,4 +336,48 @@ func completeOrder(orderNo, tradeNo string) {
 		"license_id":     license.ID,
 		"paid_at":        now,
 	})
+
+	if order.BuyerEmail != "" {
+		go sendOrderEmail(order.BuyerEmail, orderNo, program.Name, license.LicenseKey, order.Amount)
+	}
+}
+
+func sendOrderEmail(to, orderNo, programName, licenseKey string, amount float64) {
+	smtpVal := models.GetSetting("smtp_config")
+	if smtpVal == "" {
+		return
+	}
+
+	var cfg struct {
+		Host     string `json:"host"`
+		Port     int    `json:"port"`
+		User     string `json:"user"`
+		Password string `json:"password"`
+		FromName string `json:"from_name"`
+		SSL      bool   `json:"ssl"`
+	}
+	json.Unmarshal([]byte(smtpVal), &cfg)
+	if cfg.Host == "" || cfg.User == "" {
+		return
+	}
+
+	siteTitle := models.GetSetting("site_title")
+	if siteTitle == "" {
+		siteTitle = "鱼跃授权"
+	}
+
+	subject := fmt.Sprintf("%s - 订单支付成功通知", siteTitle)
+	body := fmt.Sprintf(`<div style="max-width:500px;margin:0 auto;font-family:system-ui,sans-serif;color:#333">
+<h2 style="color:#16a34a;text-align:center">支付成功</h2>
+<div style="background:#f8fafc;padding:20px;border-radius:8px;margin:16px 0">
+<p><b>订单号：</b>%s</p>
+<p><b>程序：</b>%s</p>
+<p><b>金额：</b>%.2f 元</p>
+<p style="margin-top:16px"><b>授权码：</b></p>
+<p style="font-size:18px;font-weight:bold;color:#2563eb;letter-spacing:1px">%s</p>
+</div>
+<p style="font-size:13px;color:#9ca3af;text-align:center">请妥善保存您的授权码 - %s</p>
+</div>`, orderNo, programName, amount, licenseKey, siteTitle)
+
+	utils.SendMail(cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.FromName, cfg.SSL, to, subject, body)
 }

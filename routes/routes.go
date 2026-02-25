@@ -77,6 +77,10 @@ func Setup(r *gin.Engine) {
 		admin.GET("/settings/piracy-page", controllers.GetPiracyPageHTML)
 		admin.PUT("/settings/piracy-page", controllers.UpdatePiracyPageHTML)
 
+		admin.GET("/smtp", controllers.GetSMTPConfig)
+		admin.PUT("/smtp", controllers.UpdateSMTPConfig)
+		admin.POST("/smtp/test", controllers.TestSMTPConfig)
+
 		admin.GET("/piracy", controllers.ListPiracy)
 		admin.POST("/piracy", controllers.CreatePiracy)
 		admin.PUT("/piracy/:id", controllers.UpdatePiracy)

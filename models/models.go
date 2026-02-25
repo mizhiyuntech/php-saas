@@ -126,6 +126,7 @@ func InitDefaultSettings() error {
 		{Group: "system", Key: "site_url", Value: ""},
 		{Group: "system", Key: "unauth_page_html", Value: ""},
 		{Group: "system", Key: "piracy_page_html", Value: ""},
+		{Group: "system", Key: "smtp_config", Value: ""},
 	}
 
 	for _, s := range defaults {

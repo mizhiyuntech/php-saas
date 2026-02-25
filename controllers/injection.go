@@ -47,6 +47,19 @@ func fileHash(content string) string {
 
 var sdkDir = "lib/.cache"
 
+var phpFrameworkEntries = map[string][]string{
+	"native":      {"index.php", "app.php", "main.php"},
+	"laravel":     {"public/index.php"},
+	"thinkphp":    {"public/index.php", "think"},
+	"yii":         {"web/index.php"},
+	"symfony":     {"public/index.php"},
+	"codeigniter": {"public/index.php", "index.php"},
+	"slim":        {"public/index.php", "index.php"},
+	"hyperf":      {"bin/hyperf.php"},
+	"webman":      {"start.php", "support/bootstrap.php"},
+	"workerman":   {"start.php"},
+}
+
 var entryFiles = map[string][]string{
 	"php":    {"index.php", "app.php", "public/index.php", "main.php"},
 	"python": {"main.py", "app.py", "manage.py", "run.py", "wsgi.py"},
@@ -166,6 +179,13 @@ func InjectAuthorization(c *gin.Context) {
 	if err != nil {
 		utils.ErrorServer(c, "解析ZIP文件失败")
 		return
+	}
+
+	framework := c.PostForm("framework")
+	if language == "php" && framework != "" {
+		if fEntries, ok := phpFrameworkEntries[framework]; ok {
+			entryFiles["php"] = fEntries
+		}
 	}
 
 	injectLicense := c.PostForm("inject_license") == "true"

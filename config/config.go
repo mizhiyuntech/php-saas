@@ -11,7 +11,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const CurrentDBVersion = 2
+const CurrentDBVersion = 3
 
 type AppConfig struct {
 	Installed bool        `json:"installed"`

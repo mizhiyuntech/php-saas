@@ -34,6 +34,7 @@ const menuItems = [
       { id: 'finance-orders', label: '订单查询', icon: 'i-lucide-receipt', path: '/finance/orders' }
     ]
   },
+  { id: 'smtp', label: '邮件配置', icon: 'i-lucide-mail', path: '/smtp' },
   { id: 'settings', label: '系统设置', icon: 'i-lucide-settings', path: '/settings' }
 ]
 
