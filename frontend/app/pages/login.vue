@@ -26,7 +26,7 @@ async function handleLogin() {
       authStore.setAuth(res.data.token, res.data.username)
       toast.add({ title: '登录成功', color: 'success' })
       await settingsStore.fetchSiteInfo()
-      router.push('/')
+      router.push('/dashboard')
     } else {
       toast.add({ title: res.message || '登录失败', color: 'error' })
     }

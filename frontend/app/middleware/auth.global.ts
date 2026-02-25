@@ -6,8 +6,8 @@ export default defineNuxtRouteMiddleware(async (to) => {
     authStore.loadFromStorage()
   }
 
-  const publicPages = ['/install', '/login']
-  const isPublicPage = publicPages.includes(to.path) || to.path.startsWith('/purchase')
+  const publicPaths = ['/install', '/login', '/home', '/purchase']
+  const isPublicPage = publicPaths.some(p => to.path === p || to.path.startsWith(p + '/'))
 
   if (to.path === '/install') {
     return
@@ -31,11 +31,18 @@ export default defineNuxtRouteMiddleware(async (to) => {
     }
   }
 
+  if (to.path === '/') {
+    if (authStore.isLoggedIn) {
+      return navigateTo('/dashboard')
+    }
+    return navigateTo('/home')
+  }
+
   if (!isPublicPage && !authStore.isLoggedIn) {
     return navigateTo('/login')
   }
 
   if (to.path === '/login' && authStore.isLoggedIn) {
-    return navigateTo('/')
+    return navigateTo('/dashboard')
   }
 })

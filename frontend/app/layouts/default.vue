@@ -10,7 +10,7 @@ const sidebarCollapsed = ref(false)
 const mobileMenuOpen = ref(false)
 
 const menuItems = [
-  { id: 'dashboard', label: '仪表盘', icon: 'i-lucide-layout-dashboard', path: '/' },
+  { id: 'dashboard', label: '仪表盘', icon: 'i-lucide-layout-dashboard', path: '/dashboard' },
   { id: 'programs', label: '程序管理', icon: 'i-lucide-box', path: '/programs' },
   { id: 'licenses', label: '授权管理', icon: 'i-lucide-key-round', path: '/licenses' },
   { id: 'packages', label: '套餐管理', icon: 'i-lucide-package', path: '/packages' },
@@ -65,7 +65,7 @@ function toggleMobileMenu() {
 }
 
 const breadcrumbItems = computed(() => {
-  const items: { label: string; to?: string }[] = [{ label: '首页', to: '/' }]
+  const items: { label: string; to?: string }[] = [{ label: '首页', to: '/dashboard' }]
   for (const item of menuItems) {
     if (item.children) {
       for (const child of item.children) {

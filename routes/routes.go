@@ -27,6 +27,8 @@ func Setup(r *gin.Engine) {
 		pub.GET("/payment-methods", controllers.PublicGetPaymentMethods)
 		pub.POST("/order", controllers.PublicCreateOrder)
 		pub.GET("/order/:order_no", controllers.PublicGetOrder)
+		pub.POST("/query-license", controllers.PublicQueryLicense)
+		pub.POST("/verify-domain", controllers.PublicVerifyDomain)
 	}
 
 	auth := api.Group("")

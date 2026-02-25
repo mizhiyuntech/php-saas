@@ -10,7 +10,7 @@ interface Tab {
 export const useTabsStore = defineStore('tabs', {
   state: () => ({
     tabs: [
-      { id: 'dashboard', title: '仪表盘', path: '/', closable: false }
+      { id: 'dashboard', title: '仪表盘', path: '/dashboard', closable: false }
     ] as Tab[],
     activeTab: 'dashboard'
   }),
@@ -34,7 +34,7 @@ export const useTabsStore = defineStore('tabs', {
       if (this.activeTab === id) {
         const newIndex = Math.min(index, this.tabs.length - 1)
         this.activeTab = this.tabs[newIndex]?.id || 'dashboard'
-        return this.tabs[newIndex]?.path || '/'
+        return this.tabs[newIndex]?.path || '/dashboard'
       }
       return null
     },

@@ -342,6 +342,84 @@ func completeOrder(orderNo, tradeNo string) {
 	}
 }
 
+func PublicQueryLicense(c *gin.Context) {
+	var req struct {
+		LicenseKey string `json:"license_key" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.ErrorBad(c, "请输入授权码")
+		return
+	}
+
+	var license models.License
+	if err := config.DB.Where("license_key = ?", req.LicenseKey).Preload("Program").First(&license).Error; err != nil {
+		utils.Error(c, 404, "授权码不存在")
+		return
+	}
+
+	statusLabels := map[int]string{0: "未使用", 1: "已激活", 2: "已过期", 3: "已禁用"}
+
+	utils.Success(c, gin.H{
+		"license_key":  license.LicenseKey,
+		"program_name": license.Program.Name,
+		"status":       license.Status,
+		"status_text":  statusLabels[license.Status],
+		"duration":     license.Duration,
+		"activated_at": license.ActivatedAt,
+		"expires_at":   license.ExpiresAt,
+		"created_at":   license.CreatedAt,
+	})
+}
+
+func PublicVerifyDomain(c *gin.Context) {
+	var req struct {
+		Domain string `json:"domain" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.ErrorBad(c, "请输入域名")
+		return
+	}
+
+	var record models.PiracyRecord
+	if err := config.DB.Where("domain = ? AND status = 1", req.Domain).First(&record).Error; err == nil {
+		utils.Success(c, gin.H{
+			"status":  "pirated",
+			"message": record.Message,
+		})
+		return
+	}
+
+	var license models.License
+	result := config.DB.Where("device_info LIKE ?", "%"+req.Domain+"%").First(&license)
+	if result.Error == nil && license.Status == 1 {
+		utils.Success(c, gin.H{
+			"status":       "authorized",
+			"program_name": "",
+			"license_key":  license.LicenseKey[:8] + "****",
+			"expires_at":   license.ExpiresAt,
+		})
+
+		var program models.Program
+		if config.DB.First(&program, license.ProgramID).Error == nil {
+			c.JSON(200, gin.H{
+				"code": 0, "message": "success",
+				"data": gin.H{
+					"status":       "authorized",
+					"program_name": program.Name,
+					"license_key":  license.LicenseKey[:8] + "****",
+					"expires_at":   license.ExpiresAt,
+				},
+			})
+		}
+		return
+	}
+
+	utils.Success(c, gin.H{
+		"status":  "unknown",
+		"message": "未查询到该域名的授权信息",
+	})
+}
+
 func sendOrderEmail(to, orderNo, programName, licenseKey string, amount float64) {
 	smtpVal := models.GetSetting("smtp_config")
 	if smtpVal == "" {
