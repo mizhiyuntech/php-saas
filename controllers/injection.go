@@ -3,7 +3,9 @@ package controllers
 import (
 	"archive/zip"
 	"bytes"
+	"crypto/hmac"
 	"crypto/md5"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
@@ -103,6 +105,33 @@ func injectEntryFile(lang, originalContent, sdkPath string) string {
 	return originalContent
 }
 
+func generateLicFile(licenseKey, programID, serverURL, secKey string) string {
+	xe := func(d, k string) string {
+		o := make([]byte, len(d))
+		for i := 0; i < len(d); i++ {
+			o[i] = d[i] ^ k[i%len(k)]
+		}
+		return base64.StdEncoding.EncodeToString(o)
+	}
+	hm := func(d, k string) string {
+		h := hmacSHA256(d, k)
+		return h
+	}
+
+	e1 := xe(licenseKey, secKey)
+	e2 := xe(programID, secKey)
+	e3 := xe(serverURL, secKey)
+	chk := hm(licenseKey+programID+serverURL, secKey)
+
+	return e1 + "|" + e2 + "|" + e3 + "|" + chk
+}
+
+func hmacSHA256(data, key string) string {
+	mac := hmac.New(sha256.New, []byte(key))
+	mac.Write([]byte(data))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
 func InjectAuthorization(c *gin.Context) {
 	language := c.PostForm("language")
 	if language == "" {
@@ -139,6 +168,11 @@ func InjectAuthorization(c *gin.Context) {
 		return
 	}
 
+	injectLicense := c.PostForm("inject_license") == "true"
+	licenseKey := c.PostForm("license_key")
+	programID := c.PostForm("program_id")
+	serverURL := c.PostForm("server_url")
+
 	unauthHTML := models.GetSetting("unauth_page_html")
 	if unauthHTML == "" {
 		unauthHTML = defaultUnauthHTML()
@@ -146,6 +180,10 @@ func InjectAuthorization(c *gin.Context) {
 
 	secKey := utils.GenerateRandomString(16)
 	authFiles := generateAuthFiles(language, secKey, unauthHTML)
+
+	if injectLicense && licenseKey != "" && programID != "" && serverURL != "" {
+		authFiles[".lic"] = generateLicFile(licenseKey, programID, serverURL, secKey)
+	}
 
 	existingFiles := map[string]bool{}
 	for _, f := range reader.File {
@@ -783,11 +821,11 @@ func defaultUnauthHTML() string {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Authorization Required</title>
+<title>程序授权验证</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:system-ui,-apple-system,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f8fafc}
-.box{width:100%;max-width:400px;padding:40px;background:#fff;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+.box{width:100%;max-width:420px;padding:40px;background:#fff;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.1)}
 h2{font-size:20px;font-weight:600;color:#1e293b;text-align:center;margin-bottom:8px}
 .sub{font-size:14px;color:#64748b;text-align:center;margin-bottom:24px}
 label{display:block;font-size:13px;font-weight:500;color:#374151;margin-bottom:6px}
@@ -801,14 +839,14 @@ button:hover{background:#2563eb}
 </head>
 <body>
 <div class="box">
-<h2>Program Authorization</h2>
-<p class="sub">Please enter your license information to continue</p>
+<h2>程序授权验证</h2>
+<p class="sub">此程序需要授权才能使用，请输入授权信息</p>
 <form method="POST">
 <input type="hidden" name="_sys_action" value="activate">
-<div class="field"><label>License Key</label><input type="text" name="_sys_lk" placeholder="XXXX-XXXX-XXXX-XXXX" required></div>
-<div class="field"><label>Program ID</label><input type="text" name="_sys_pid" placeholder="Program ID" required></div>
-<div class="field"><label>Server URL</label><input type="text" name="_sys_url" placeholder="https://your-auth-server.com" required></div>
-<button type="submit">Activate</button>
+<div class="field"><label>授权码</label><input type="text" name="_sys_lk" placeholder="XXXX-XXXX-XXXX-XXXX" required></div>
+<div class="field"><label>程序ID</label><input type="text" name="_sys_pid" placeholder="请输入程序ID" required></div>
+<div class="field"><label>授权服务器地址</label><input type="text" name="_sys_url" placeholder="https://your-auth-server.com" required></div>
+<button type="submit">激活授权</button>
 </form>
 </div>
 </body>

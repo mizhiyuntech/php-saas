@@ -164,18 +164,20 @@ watch(() => route.path, (newPath) => {
 <template>
   <div class="flex h-screen bg-gray-50 dark:bg-gray-950">
     <!-- Mobile overlay backdrop -->
-    <div
-      v-if="mobileMenuOpen"
-      class="fixed inset-0 z-30 bg-black/50 lg:hidden"
-      @click="mobileMenuOpen = false"
-    />
+    <Transition name="fade">
+      <div
+        v-if="mobileMenuOpen"
+        class="fixed inset-0 z-30 bg-black/50 lg:hidden"
+        @click="mobileMenuOpen = false"
+      />
+    </Transition>
 
-    <!-- Sidebar -->
+    <!-- Sidebar (mobile: slide in/out, PC: collapse/expand) -->
     <aside
-      class="bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col shrink-0 transition-all duration-200 z-40"
+      class="bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col shrink-0 z-40 transition-all duration-200 lg:relative lg:translate-x-0 fixed inset-y-0 left-0"
       :class="[
-        sidebarCollapsed ? 'w-14' : 'w-60',
-        mobileMenuOpen ? 'fixed inset-y-0 left-0' : 'hidden lg:flex'
+        sidebarCollapsed ? 'lg:w-14 w-60' : 'w-60',
+        mobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
       ]"
     >
       <!-- Sidebar header -->
@@ -361,3 +363,14 @@ watch(() => route.path, (newPath) => {
     </UModal>
   </div>
 </template>
+
+<style scoped>
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+</style>

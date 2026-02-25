@@ -10,6 +10,11 @@ const selectedFile = ref<File | null>(null)
 const uploading = ref(false)
 const fileName = ref('')
 
+const injectLicense = ref(false)
+const licenseKey = ref('')
+const programId = ref('')
+const serverUrl = ref('')
+
 onMounted(async () => {
   const res = await get('/api/injection/languages')
   if (res.code === 0) {
@@ -43,12 +48,25 @@ async function handleInject() {
     toast.add({ title: '请上传ZIP文件', color: 'error' })
     return
   }
+  if (injectLicense.value) {
+    if (!licenseKey.value || !programId.value || !serverUrl.value) {
+      toast.add({ title: '请填写完整的许可证信息', color: 'error' })
+      return
+    }
+  }
 
   uploading.value = true
   try {
     const formData = new FormData()
     formData.append('file', selectedFile.value)
     formData.append('language', selectedLanguage.value)
+
+    if (injectLicense.value) {
+      formData.append('inject_license', 'true')
+      formData.append('license_key', licenseKey.value)
+      formData.append('program_id', programId.value)
+      formData.append('server_url', serverUrl.value)
+    }
 
     const config = useRuntimeConfig()
     const authStore = useAuthStore()
@@ -137,6 +155,35 @@ function clearFile() {
           </div>
         </UFormField>
 
+        <!-- License injection toggle -->
+        <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-4">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm font-medium text-gray-700 dark:text-gray-300">注入许可证</p>
+              <p class="text-xs text-gray-500 mt-0.5">如果程序有商业需求，可预填授权信息一起注入。许可证内容以加密形式存储，不影响程序运行</p>
+            </div>
+            <USwitch v-model="injectLicense" />
+          </div>
+
+          <template v-if="injectLicense">
+            <UFormField label="授权码" required>
+              <UInput v-model="licenseKey" placeholder="XXXX-XXXX-XXXX-XXXX" />
+            </UFormField>
+            <UFormField label="程序ID" required>
+              <UInput v-model="programId" placeholder="在程序管理中创建后获取" />
+            </UFormField>
+            <UFormField label="授权服务器地址" required>
+              <UInput v-model="serverUrl" placeholder="https://your-auth-server.com" />
+            </UFormField>
+            <UAlert
+              title="提示"
+              description="填写的许可证信息将以XOR加密+HMAC签名的形式写入程序的 .lic 文件，程序启动时自动读取并验证，无需用户手动输入授权码。"
+              color="info"
+              variant="subtle"
+            />
+          </template>
+        </div>
+
         <UButton
           block
           size="lg"
@@ -163,12 +210,12 @@ function clearFile() {
           <p>系统会自动扫描程序入口文件（如 index.php / app.js / main.py 等），注入SDK引用代码，无需手动修改</p>
         </div>
         <div>
-          <p class="font-medium text-gray-700 dark:text-gray-300 mb-1">安全校验</p>
-          <p>采用 XOR 加密存储配置、HMAC-SHA256 签名通信、时间戳防重放，授权信息加密存储于 .lic 文件</p>
+          <p class="font-medium text-gray-700 dark:text-gray-300 mb-1">许可证注入</p>
+          <p>可选择预填授权信息，注入后生成加密的 .lic 文件。程序启动时自动读取验证，用户无感知。不勾选则用户需手动激活</p>
         </div>
         <div>
-          <p class="font-medium text-gray-700 dark:text-gray-300 mb-1">未授权拦截</p>
-          <p>程序启动时自动校验授权，未通过则显示授权激活页面，需输入授权码、程序ID和服务器地址。可在「系统设置」中自定义此页面</p>
+          <p class="font-medium text-gray-700 dark:text-gray-300 mb-1">安全校验</p>
+          <p>采用 XOR 加密存储配置、HMAC-SHA256 签名通信、时间戳防重放，授权信息加密存储于 .lic 文件</p>
         </div>
       </div>
     </UCard>
