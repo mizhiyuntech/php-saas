@@ -95,10 +95,11 @@ func InitDefaultSettings() error {
 		{Group: "system", Key: "police_record", Value: ""},
 		{Group: "system", Key: "site_icon", Value: ""},
 		{Group: "system", Key: "site_favicon", Value: ""},
+		{Group: "system", Key: "site_url", Value: ""},
 	}
 
 	for _, s := range defaults {
-		config.DB.Where("key_name = ?", s.Key).FirstOrCreate(&s, Setting{Key: s.Key})
+		config.DB.Where("`key` = ?", s.Key).FirstOrCreate(&s, Setting{Key: s.Key})
 	}
 	return nil
 }

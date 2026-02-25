@@ -53,6 +53,8 @@ func main() {
 
 	frontendDist := "./frontend/.output/public"
 	if _, err := os.Stat(frontendDist); err == nil {
+		r.StaticFS("/_nuxt", http.Dir(filepath.Join(frontendDist, "_nuxt")))
+
 		r.NoRoute(func(c *gin.Context) {
 			path := c.Request.URL.Path
 
@@ -62,12 +64,19 @@ func main() {
 			}
 
 			filePath := filepath.Join(frontendDist, path)
-			if _, err := os.Stat(filePath); err == nil {
+			info, err := os.Stat(filePath)
+			if err == nil && !info.IsDir() {
 				c.File(filePath)
 				return
 			}
 
-			c.File(filepath.Join(frontendDist, "index.html"))
+			htmlPath := filepath.Join(frontendDist, path, "index.html")
+			if _, err := os.Stat(htmlPath); err == nil {
+				c.File(htmlPath)
+				return
+			}
+
+			c.File(filepath.Join(frontendDist, "200.html"))
 		})
 	} else {
 		r.NoRoute(func(c *gin.Context) {
