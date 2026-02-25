@@ -17,7 +17,17 @@ func Setup(r *gin.Engine) {
 	api.POST("/license/verify", controllers.VerifyLicense)
 	api.POST("/piracy/check", controllers.CheckPiracy)
 
-	api.POST("/payment/callback/:type/:action", controllers.PaymentCallback)
+	api.GET("/payment/callback/:type/:action", controllers.HandlePaymentCallback)
+	api.POST("/payment/callback/:type/:action", controllers.HandlePaymentCallback)
+
+	pub := api.Group("/public")
+	{
+		pub.GET("/programs", controllers.PublicListPrograms)
+		pub.GET("/packages", controllers.PublicListPackages)
+		pub.GET("/payment-methods", controllers.PublicGetPaymentMethods)
+		pub.POST("/order", controllers.PublicCreateOrder)
+		pub.GET("/order/:order_no", controllers.PublicGetOrder)
+	}
 
 	auth := api.Group("")
 	auth.Use(middleware.InstallCheck())
@@ -44,6 +54,11 @@ func Setup(r *gin.Engine) {
 		admin.POST("/licenses", controllers.CreateLicenses)
 		admin.PUT("/licenses/:id", controllers.UpdateLicense)
 		admin.DELETE("/licenses/:id", controllers.DeleteLicense)
+
+		admin.GET("/packages", controllers.ListPackages)
+		admin.POST("/packages", controllers.CreatePackage)
+		admin.PUT("/packages/:id", controllers.UpdatePackage)
+		admin.DELETE("/packages/:id", controllers.DeletePackage)
 
 		admin.GET("/injection/languages", controllers.GetLanguages)
 		admin.POST("/injection/upload", controllers.InjectAuthorization)

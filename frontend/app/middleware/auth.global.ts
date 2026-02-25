@@ -7,7 +7,7 @@ export default defineNuxtRouteMiddleware(async (to) => {
   }
 
   const publicPages = ['/install', '/login']
-  const isPublicPage = publicPages.includes(to.path)
+  const isPublicPage = publicPages.includes(to.path) || to.path.startsWith('/purchase')
 
   if (to.path === '/install') {
     return

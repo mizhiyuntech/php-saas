@@ -46,12 +46,14 @@ type Order struct {
 	OrderNo       string     `gorm:"uniqueIndex;size:64;not null" json:"order_no"`
 	ProgramID     uint       `gorm:"index" json:"program_id"`
 	Program       Program    `gorm:"foreignKey:ProgramID" json:"program,omitempty"`
+	PackageID     *uint      `json:"package_id"`
 	LicenseID     *uint      `json:"license_id"`
 	License       *License   `gorm:"foreignKey:LicenseID" json:"license,omitempty"`
 	Amount        float64    `gorm:"type:decimal(10,2)" json:"amount"`
 	PaymentMethod string     `gorm:"size:20" json:"payment_method"`
 	PaymentStatus int        `gorm:"default:0" json:"payment_status"`
 	TradeNo       string     `gorm:"size:100" json:"trade_no"`
+	BuyerEmail    string     `gorm:"size:100" json:"buyer_email"`
 	PaidAt        *time.Time `json:"paid_at"`
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at"`
@@ -75,6 +77,20 @@ type PaymentConfig struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+type Package struct {
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	ProgramID   uint      `gorm:"index;not null" json:"program_id"`
+	Program     Program   `gorm:"foreignKey:ProgramID" json:"program,omitempty"`
+	Name        string    `gorm:"size:100;not null" json:"name"`
+	Description string    `gorm:"size:500" json:"description"`
+	Duration    int       `gorm:"default:0" json:"duration"`
+	Price       float64   `gorm:"type:decimal(10,2);not null" json:"price"`
+	SortOrder   int       `gorm:"default:0" json:"sort_order"`
+	Status      int       `gorm:"default:1" json:"status"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
 type PiracyRecord struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
 	Domain    string    `gorm:"size:255;not null" json:"domain"`
@@ -94,6 +110,7 @@ func AutoMigrate() error {
 		&Setting{},
 		&PaymentConfig{},
 		&PiracyRecord{},
+		&Package{},
 	)
 }
 

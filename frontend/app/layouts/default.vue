@@ -13,6 +13,7 @@ const menuItems = [
   { id: 'dashboard', label: '仪表盘', icon: 'i-lucide-layout-dashboard', path: '/' },
   { id: 'programs', label: '程序管理', icon: 'i-lucide-box', path: '/programs' },
   { id: 'licenses', label: '授权管理', icon: 'i-lucide-key-round', path: '/licenses' },
+  { id: 'packages', label: '套餐管理', icon: 'i-lucide-package', path: '/packages' },
   { id: 'injection', label: '在线注入', icon: 'i-lucide-upload', path: '/injection' },
   { id: 'piracy', label: '盗版管理', icon: 'i-lucide-shield-alert', path: '/piracy' },
   {

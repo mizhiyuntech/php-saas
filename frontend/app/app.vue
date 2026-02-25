@@ -23,8 +23,20 @@ useHead(() => ({
 
 <template>
   <UApp>
+    <NuxtLoadingIndicator color="#3b82f6" :height="3" />
     <NuxtLayout>
-      <NuxtPage />
+      <NuxtPage :transition="{ name: 'page', mode: 'out-in' }" />
     </NuxtLayout>
   </UApp>
 </template>
+
+<style>
+.page-enter-active,
+.page-leave-active {
+  transition: opacity 0.15s ease;
+}
+.page-enter-from,
+.page-leave-to {
+  opacity: 0;
+}
+</style>
