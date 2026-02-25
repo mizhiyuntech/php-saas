@@ -96,6 +96,7 @@ func InitDefaultSettings() error {
 		{Group: "system", Key: "site_icon", Value: ""},
 		{Group: "system", Key: "site_favicon", Value: ""},
 		{Group: "system", Key: "site_url", Value: ""},
+		{Group: "system", Key: "unauth_page_html", Value: ""},
 	}
 
 	for _, s := range defaults {

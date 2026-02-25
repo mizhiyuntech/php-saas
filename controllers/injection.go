@@ -3,11 +3,15 @@ package controllers
 import (
 	"archive/zip"
 	"bytes"
+	"crypto/md5"
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"path/filepath"
 	"strings"
 
+	"yuyue-auth/models"
 	"yuyue-auth/utils"
 
 	"github.com/gin-gonic/gin"
@@ -24,6 +28,79 @@ var supportedLanguages = []gin.H{
 
 func GetLanguages(c *gin.Context) {
 	utils.Success(c, supportedLanguages)
+}
+
+func xorEncode(data, key string) string {
+	result := make([]byte, len(data))
+	for i := 0; i < len(data); i++ {
+		result[i] = data[i] ^ key[i%len(key)]
+	}
+	return base64.StdEncoding.EncodeToString(result)
+}
+
+func fileHash(content string) string {
+	h := md5.Sum([]byte(content))
+	return hex.EncodeToString(h[:])
+}
+
+var sdkDir = "lib/.cache"
+
+var entryFiles = map[string][]string{
+	"php":    {"index.php", "app.php", "public/index.php", "main.php"},
+	"python": {"main.py", "app.py", "manage.py", "run.py", "wsgi.py"},
+	"nodejs": {"index.js", "app.js", "server.js", "main.js", "src/index.js", "src/app.js"},
+	"go":     {"main.go", "cmd/main.go", "cmd/server/main.go"},
+	"java":   {"src/Main.java", "src/App.java", "src/main/java/Main.java", "src/main/java/App.java"},
+	"csharp": {"Program.cs", "Startup.cs", "src/Program.cs"},
+}
+
+func sdkFileName(lang string) string {
+	switch lang {
+	case "php":
+		return "bootstrap.php"
+	case "python":
+		return "bootstrap.py"
+	case "nodejs":
+		return "bootstrap.js"
+	case "go":
+		return "bootstrap.go"
+	case "java":
+		return "Bootstrap.java"
+	case "csharp":
+		return "Bootstrap.cs"
+	}
+	return "bootstrap"
+}
+
+func entryImportLine(lang, sdkPath string) string {
+	switch lang {
+	case "php":
+		return fmt.Sprintf("<?php require_once __DIR__.'/%s/%s'; ?>", sdkPath, sdkFileName(lang))
+	case "python":
+		mod := strings.ReplaceAll(sdkPath, "/", ".")
+		return fmt.Sprintf("from %s.bootstrap import *\n", mod)
+	case "nodejs":
+		return fmt.Sprintf("require('./%s/%s');\n", sdkPath, sdkFileName(lang))
+	}
+	return ""
+}
+
+func injectEntryFile(lang, originalContent, sdkPath string) string {
+	switch lang {
+	case "php":
+		importLine := fmt.Sprintf("require_once __DIR__.'/%s/%s';", sdkPath, sdkFileName(lang))
+		if strings.HasPrefix(strings.TrimSpace(originalContent), "<?php") {
+			return strings.Replace(originalContent, "<?php", "<?php\n"+importLine, 1)
+		}
+		return "<?php\n" + importLine + "\n?>" + originalContent
+	case "python":
+		importLine := fmt.Sprintf("from %s.bootstrap import *", strings.ReplaceAll(sdkPath, "/", "."))
+		return importLine + "\n" + originalContent
+	case "nodejs":
+		importLine := fmt.Sprintf("require('./%s/%s');", sdkPath, sdkFileName(lang))
+		return importLine + "\n" + originalContent
+	}
+	return originalContent
 }
 
 func InjectAuthorization(c *gin.Context) {
@@ -62,29 +139,71 @@ func InjectAuthorization(c *gin.Context) {
 		return
 	}
 
+	unauthHTML := models.GetSetting("unauth_page_html")
+	if unauthHTML == "" {
+		unauthHTML = defaultUnauthHTML()
+	}
+
+	secKey := utils.GenerateRandomString(16)
+	authFiles := generateAuthFiles(language, secKey, unauthHTML)
+
+	existingFiles := map[string]bool{}
+	for _, f := range reader.File {
+		existingFiles[f.Name] = true
+	}
+	entryTargets := entryFiles[language]
+
 	var buf bytes.Buffer
 	writer := zip.NewWriter(&buf)
 
 	for _, f := range reader.File {
+		content, err := readZipFile(f)
+		if err != nil {
+			continue
+		}
+
+		shouldInject := false
+		for _, ef := range entryTargets {
+			if matchEntryFile(f.Name, ef) {
+				shouldInject = true
+				break
+			}
+		}
+
+		if shouldInject && (language == "php" || language == "python" || language == "nodejs") {
+			relSDK := relativeSDKPath(f.Name, sdkDir)
+			content = injectEntryFile(language, content, relSDK)
+		}
+
 		w, err := writer.Create(f.Name)
 		if err != nil {
 			continue
 		}
-		rc, err := f.Open()
-		if err != nil {
-			continue
-		}
-		io.Copy(w, rc)
-		rc.Close()
+		w.Write([]byte(content))
 	}
 
-	authFiles := generateAuthFiles(language)
 	for name, content := range authFiles {
-		w, err := writer.Create(filepath.Join("_auth", name))
+		w, err := writer.Create(filepath.Join(sdkDir, name))
 		if err != nil {
 			continue
 		}
 		w.Write([]byte(content))
+	}
+
+	if language == "python" {
+		initPath := filepath.Join(sdkDir, "__init__.py")
+		if !existingFiles[initPath] {
+			w, _ := writer.Create(initPath)
+			w.Write([]byte(""))
+		}
+		parts := strings.Split(sdkDir, "/")
+		for i := range parts {
+			p := filepath.Join(strings.Join(parts[:i+1], "/"), "__init__.py")
+			if !existingFiles[p] {
+				w, _ := writer.Create(p)
+				w.Write([]byte(""))
+			}
+		}
 	}
 
 	writer.Close()
@@ -96,324 +215,602 @@ func InjectAuthorization(c *gin.Context) {
 	c.Data(200, "application/zip", buf.Bytes())
 }
 
-func generateAuthFiles(language string) map[string]string {
+func readZipFile(f *zip.File) (string, error) {
+	rc, err := f.Open()
+	if err != nil {
+		return "", err
+	}
+	defer rc.Close()
+	data, err := io.ReadAll(rc)
+	return string(data), err
+}
+
+func matchEntryFile(zipName, pattern string) bool {
+	base := filepath.Base(zipName)
+	patBase := filepath.Base(pattern)
+	if base != patBase {
+		return false
+	}
+	parts := strings.Split(filepath.ToSlash(zipName), "/")
+	if len(parts) <= 2 {
+		return true
+	}
+	patParts := strings.Split(filepath.ToSlash(pattern), "/")
+	if len(patParts) > 1 {
+		return strings.HasSuffix(filepath.ToSlash(zipName), pattern)
+	}
+	return true
+}
+
+func relativeSDKPath(entryFile, sdkPath string) string {
+	entryDir := filepath.Dir(entryFile)
+	parts := strings.Split(filepath.ToSlash(entryDir), "/")
+	depth := 0
+	for _, p := range parts {
+		if p != "" && p != "." {
+			depth++
+		}
+	}
+	if depth == 0 {
+		return sdkPath
+	}
+	prefix := strings.Repeat("../", depth)
+	return prefix + sdkPath
+}
+
+func generateAuthFiles(language, secKey, unauthHTML string) map[string]string {
 	files := make(map[string]string)
+
+	encodedHTML := base64.StdEncoding.EncodeToString([]byte(unauthHTML))
 
 	switch language {
 	case "php":
-		files["check_license.php"] = `<?php
-/**
- * 鱼跃授权 - 授权验证模块
- * 将此文件引入到您的项目入口文件中
- */
-
-function yuyue_check_license($license_key, $api_url, $program_id) {
-    $data = json_encode([
-        'license_key' => $license_key,
-        'program_id'  => (int)$program_id,
-        'device_info' => php_uname()
-    ]);
-
-    $ch = curl_init($api_url . '/api/license/verify');
-    curl_setopt_array($ch, [
-        CURLOPT_POST           => true,
-        CURLOPT_POSTFIELDS     => $data,
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
-        CURLOPT_TIMEOUT        => 10,
-    ]);
-
-    $response = curl_exec($ch);
-    curl_close($ch);
-
-    if (!$response) {
-        return false;
-    }
-
-    $result = json_decode($response, true);
-    return isset($result['code']) && $result['code'] === 0;
-}
-
-// 使用示例:
-// $authorized = yuyue_check_license('YOUR-LICENSE-KEY', 'https://your-domain.com', 1);
-// if (!$authorized) { die('授权验证失败'); }
-`
-		files["config.php"] = `<?php
-// 鱼跃授权配置文件
-return [
-    'api_url'     => 'https://your-domain.com',
-    'program_id'  => 1,
-    'license_key' => 'YOUR-LICENSE-KEY',
-];
-`
+		sdkCode := generatePHPSDK(secKey, encodedHTML)
+		files[sdkFileName(language)] = sdkCode
+		files["env.dat"] = xorEncode("YUYUE_AUTH_MARKER", secKey)
 
 	case "python":
-		files["check_license.py"] = `"""
-鱼跃授权 - 授权验证模块
-将此模块导入到您的项目中使用
-"""
-import json
-import platform
-import urllib.request
+		sdkCode := generatePythonSDK(secKey, encodedHTML)
+		files[sdkFileName(language)] = sdkCode
+		files["__init__.py"] = ""
 
+	case "nodejs":
+		sdkCode := generateNodeSDK(secKey, encodedHTML)
+		files[sdkFileName(language)] = sdkCode
 
-def check_license(license_key: str, api_url: str, program_id: int) -> bool:
-    data = json.dumps({
-        "license_key": license_key,
-        "program_id": program_id,
-        "device_info": platform.node()
-    }).encode("utf-8")
+	case "go":
+		sdkCode := generateGoSDK(secKey, encodedHTML)
+		files[sdkFileName(language)] = sdkCode
 
-    req = urllib.request.Request(
-        f"{api_url}/api/license/verify",
-        data=data,
-        headers={"Content-Type": "application/json"},
-        method="POST"
-    )
+	case "java":
+		sdkCode := generateJavaSDK(secKey, encodedHTML)
+		files[sdkFileName(language)] = sdkCode
 
+	case "csharp":
+		sdkCode := generateCSharpSDK(secKey, encodedHTML)
+		files[sdkFileName(language)] = sdkCode
+	}
+
+	return files
+}
+
+func generatePHPSDK(secKey, encodedHTML string) string {
+	return fmt.Sprintf(`<?php
+defined('APP_START') or define('APP_START', microtime(true));
+$_sys_k = '%s';
+$_sys_d = __DIR__;
+$_sys_f = $_sys_d . DIRECTORY_SEPARATOR . '.lic';
+
+function _sys_xd($d, $k) {
+    $r = base64_decode($d);
+    $o = '';
+    for ($i = 0; $i < strlen($r); $i++) {
+        $o .= chr(ord($r[$i]) ^ ord($k[$i %% strlen($k)]));
+    }
+    return $o;
+}
+
+function _sys_hm($d, $k) {
+    return hash_hmac('sha256', $d, $k);
+}
+
+function _sys_vf($key, $pid, $url, $k) {
+    $ts = time();
+    $sg = _sys_hm($key . $pid . $ts, $k);
+    $payload = json_encode([
+        'license_key' => $key,
+        'program_id'  => (int)$pid,
+        'device_info' => php_uname('n') . '|' . php_uname('m'),
+        '_ts' => $ts,
+        '_sg' => $sg
+    ]);
+    $ch = curl_init($url . '/api/license/verify');
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => $payload,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+        CURLOPT_TIMEOUT => 10,
+        CURLOPT_SSL_VERIFYPEER => false,
+    ]);
+    $resp = curl_exec($ch);
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    if (!$resp || $code !== 200) return false;
+    $r = json_decode($resp, true);
+    return isset($r['code']) && $r['code'] === 0;
+}
+
+$_sys_ok = false;
+
+if (file_exists($_sys_f)) {
+    $_sys_ld = @file_get_contents($_sys_f);
+    if ($_sys_ld) {
+        $_sys_parts = explode('|', $_sys_ld, 4);
+        if (count($_sys_parts) === 4) {
+            $_sys_lk = _sys_xd($_sys_parts[0], $_sys_k);
+            $_sys_pid = _sys_xd($_sys_parts[1], $_sys_k);
+            $_sys_url = _sys_xd($_sys_parts[2], $_sys_k);
+            $_sys_chk = $_sys_parts[3];
+            if (_sys_hm($_sys_lk . $_sys_pid . $_sys_url, $_sys_k) === $_sys_chk) {
+                $_sys_ok = _sys_vf($_sys_lk, $_sys_pid, $_sys_url, $_sys_k);
+            }
+        }
+    }
+}
+
+if ($_sys_ok) return;
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['_sys_action']) && $_POST['_sys_action'] === 'activate') {
+    $_sys_lk = trim($_POST['_sys_lk'] ?? '');
+    $_sys_pid = trim($_POST['_sys_pid'] ?? '');
+    $_sys_url = trim($_POST['_sys_url'] ?? '');
+    if ($_sys_lk && $_sys_pid && $_sys_url) {
+        if (_sys_vf($_sys_lk, $_sys_pid, $_sys_url, $_sys_k)) {
+            $_sys_chk = _sys_hm($_sys_lk . $_sys_pid . $_sys_url, $_sys_k);
+            $enc = implode('|', [
+                base64_encode(_sys_xd_enc($_sys_lk, $_sys_k)),
+                base64_encode(_sys_xd_enc($_sys_pid, $_sys_k)),
+                base64_encode(_sys_xd_enc($_sys_url, $_sys_k)),
+                $_sys_chk
+            ]);
+            // re-encode with xor for storage
+            $_sys_store = implode('|', [
+                _sys_xe($_sys_lk, $_sys_k),
+                _sys_xe($_sys_pid, $_sys_k),
+                _sys_xe($_sys_url, $_sys_k),
+                $_sys_chk
+            ]);
+            @file_put_contents($_sys_f, $_sys_store);
+            header('Location: ' . $_SERVER['REQUEST_URI']);
+            exit;
+        } else {
+            $_sys_err = 'LICENSE_INVALID';
+        }
+    }
+}
+
+function _sys_xe($d, $k) {
+    $o = '';
+    for ($i = 0; $i < strlen($d); $i++) {
+        $o .= chr(ord($d[$i]) ^ ord($k[$i %% strlen($k)]));
+    }
+    return base64_encode($o);
+}
+
+$_sys_html = base64_decode('%s');
+if (isset($_sys_err)) {
+    $_sys_html = str_replace('<!--ERR-->', '<p style="color:#dc2626;text-align:center;margin:8px 0">授权码无效，请检查后重试</p>', $_sys_html);
+}
+echo $_sys_html;
+exit;
+`, secKey, encodedHTML)
+}
+
+func generatePythonSDK(secKey, encodedHTML string) string {
+	return fmt.Sprintf(`import os, sys, json, base64, hashlib, hmac, platform, time
+from urllib.request import Request, urlopen
+from urllib.error import URLError
+
+_K = '%s'
+_D = os.path.dirname(os.path.abspath(__file__))
+_F = os.path.join(_D, '.lic')
+
+def _xd(d, k):
+    r = base64.b64decode(d)
+    return bytes([r[i] ^ ord(k[i %% len(k)]) for i in range(len(r))])
+
+def _xe(d, k):
+    r = bytes([ord(d[i]) ^ ord(k[i %% len(k)]) for i in range(len(d))])
+    return base64.b64encode(r).decode()
+
+def _hm(d, k):
+    return hmac.new(k.encode(), d.encode(), hashlib.sha256).hexdigest()
+
+def _vf(key, pid, url, k):
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            result = json.loads(resp.read().decode())
-            return result.get("code") == 0
+        ts = str(int(time.time()))
+        sg = _hm(key + pid + ts, k)
+        payload = json.dumps({
+            'license_key': key, 'program_id': int(pid),
+            'device_info': platform.node() + '|' + platform.machine(),
+            '_ts': ts, '_sg': sg
+        }).encode()
+        req = Request(url + '/api/license/verify', data=payload,
+                      headers={'Content-Type': 'application/json'}, method='POST')
+        with urlopen(req, timeout=10) as resp:
+            r = json.loads(resp.read())
+            return r.get('code') == 0
     except Exception:
         return False
 
+_ok = False
+if os.path.exists(_F):
+    try:
+        with open(_F, 'r') as f:
+            parts = f.read().strip().split('|', 3)
+        if len(parts) == 4:
+            lk = _xd(parts[0], _K).decode()
+            pid = _xd(parts[1], _K).decode()
+            url = _xd(parts[2], _K).decode()
+            chk = parts[3]
+            if _hm(lk + pid + url, _K) == chk:
+                _ok = _vf(lk, pid, url, _K)
+    except Exception:
+        pass
 
-# 使用示例:
-# if not check_license("YOUR-LICENSE-KEY", "https://your-domain.com", 1):
-#     raise SystemExit("授权验证失败")
-`
-		files["config.py"] = `# 鱼跃授权配置文件
-AUTH_CONFIG = {
-    "api_url": "https://your-domain.com",
-    "program_id": 1,
-    "license_key": "YOUR-LICENSE-KEY",
+if not _ok:
+    print('This application requires a valid license.')
+    print('Please configure the license in:', _F)
+    print('Format: encoded_key|encoded_pid|encoded_url|hmac_checksum')
+    sys.exit(1)
+`, secKey)
 }
-`
 
-	case "nodejs":
-		files["check_license.js"] = `/**
- * 鱼跃授权 - 授权验证模块
- * 在项目中引入此模块
- */
-const https = require('https');
-const http = require('http');
-const os = require('os');
+func generateNodeSDK(secKey, encodedHTML string) string {
+	return fmt.Sprintf(`'use strict';
+const _c = require('crypto'), _h = require('http'), _hs = require('https');
+const _p = require('path'), _f = require('fs'), _o = require('os');
+const _K = '%s';
+const _D = __dirname;
+const _LF = _p.join(_D, '.lic');
 
-function checkLicense(licenseKey, apiUrl, programId) {
-  return new Promise((resolve, reject) => {
+function _xd(d, k) {
+  const r = Buffer.from(d, 'base64');
+  return Buffer.from(r.map((b, i) => b ^ k.charCodeAt(i %% k.length))).toString();
+}
+function _xe(d, k) {
+  const r = Buffer.from(d).map((b, i) => b ^ k.charCodeAt(i %% k.length));
+  return Buffer.from(r).toString('base64');
+}
+function _hm(d, k) {
+  return _c.createHmac('sha256', k).update(d).digest('hex');
+}
+function _vf(key, pid, url, k) {
+  return new Promise((resolve) => {
+    const ts = Math.floor(Date.now()/1000).toString();
+    const sg = _hm(key + pid + ts, k);
     const data = JSON.stringify({
-      license_key: licenseKey,
-      program_id: programId,
-      device_info: os.hostname()
+      license_key: key, program_id: parseInt(pid),
+      device_info: _o.hostname() + '|' + _o.arch(),
+      _ts: ts, _sg: sg
     });
-
-    const url = new URL(apiUrl + '/api/license/verify');
-    const client = url.protocol === 'https:' ? https : http;
-
+    const u = new URL(url + '/api/license/verify');
+    const client = u.protocol === 'https:' ? _hs : _h;
     const req = client.request({
-      hostname: url.hostname,
-      port: url.port,
-      path: url.pathname,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(data)
-      },
+      hostname: u.hostname, port: u.port, path: u.pathname,
+      method: 'POST', headers: {'Content-Type':'application/json','Content-Length':Buffer.byteLength(data)},
       timeout: 10000
     }, (res) => {
       let body = '';
-      res.on('data', chunk => body += chunk);
+      res.on('data', c => body += c);
       res.on('end', () => {
-        try {
-          const result = JSON.parse(body);
-          resolve(result.code === 0);
-        } catch (e) {
-          resolve(false);
-        }
+        try { resolve(JSON.parse(body).code === 0); } catch(e) { resolve(false); }
       });
     });
-
     req.on('error', () => resolve(false));
-    req.write(data);
-    req.end();
+    req.write(data); req.end();
   });
 }
 
-module.exports = { checkLicense };
+(async () => {
+  let ok = false;
+  if (_f.existsSync(_LF)) {
+    try {
+      const parts = _f.readFileSync(_LF, 'utf8').trim().split('|', 4);
+      if (parts.length === 4) {
+        const lk = _xd(parts[0], _K), pid = _xd(parts[1], _K), url = _xd(parts[2], _K);
+        if (_hm(lk + pid + url, _K) === parts[3]) {
+          ok = await _vf(lk, pid, url, _K);
+        }
+      }
+    } catch(e) {}
+  }
+  if (!ok) {
+    const html = Buffer.from('%s', 'base64').toString();
+    try {
+      const express = require.main && require.main.exports;
+    } catch(e) {}
+    console.error('License verification failed. Configure license in: ' + _LF);
+    process.exit(1);
+  }
+})();
+`, secKey, encodedHTML)
+}
 
-// 使用示例:
-// const { checkLicense } = require('./_auth/check_license');
-// const authorized = await checkLicense('YOUR-LICENSE-KEY', 'https://your-domain.com', 1);
-`
-		files["config.js"] = `// 鱼跃授权配置文件
-module.exports = {
-  apiUrl: 'https://your-domain.com',
-  programId: 1,
-  licenseKey: 'YOUR-LICENSE-KEY',
-};
-`
-
-	case "go":
-		files["check_license.go"] = `package auth
+func generateGoSDK(secKey, encodedHTML string) string {
+	return fmt.Sprintf(`package bootstrap
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
 	"time"
 )
 
-// CheckLicense 验证授权 - 鱼跃授权验证模块
-func CheckLicense(licenseKey, apiURL string, programID int) error {
-	hostname, _ := os.Hostname()
-	payload := map[string]interface{}{
-		"license_key": licenseKey,
-		"program_id":  programID,
-		"device_info": hostname,
-	}
+var _k = "%s"
 
-	body, _ := json.Marshal(payload)
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Post(apiURL+"/api/license/verify", "application/json", bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("授权验证请求失败: %w", err)
+func init() {
+	dir := selfDir()
+	licFile := filepath.Join(dir, ".lic")
+	if data, err := os.ReadFile(licFile); err == nil {
+		parts := strings.SplitN(string(data), "|", 4)
+		if len(parts) == 4 {
+			lk := xd(parts[0], _k)
+			pid := xd(parts[1], _k)
+			url := xd(parts[2], _k)
+			chk := parts[3]
+			if hm(lk+pid+url, _k) == chk {
+				if vf(lk, pid, url, _k) {
+					return
+				}
+			}
+		}
 	}
-	defer resp.Body.Close()
-
-	var result map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return fmt.Errorf("授权验证响应解析失败: %w", err)
-	}
-
-	if code, ok := result["code"].(float64); !ok || code != 0 {
-		msg, _ := result["message"].(string)
-		return fmt.Errorf("授权验证失败: %s", msg)
-	}
-
-	return nil
+	fmt.Fprintln(os.Stderr, "License verification failed.")
+	fmt.Fprintln(os.Stderr, "Configure license in:", licFile)
+	os.Exit(1)
 }
-`
-		files["config.go"] = `package auth
 
-// 鱼跃授权配置
-var (
-	APIUrl     = "https://your-domain.com"
-	ProgramID  = 1
-	LicenseKey = "YOUR-LICENSE-KEY"
-)
-`
+func selfDir() string {
+	_, f, _, _ := runtime.Caller(0)
+	return filepath.Dir(f)
+}
 
-	case "java":
-		files["CheckLicense.java"] = `package auth;
+func xd(d, k string) string {
+	r, _ := base64.StdEncoding.DecodeString(d)
+	out := make([]byte, len(r))
+	for i := range r { out[i] = r[i] ^ k[i%%len(k)] }
+	return string(out)
+}
 
-import java.io.*;
+func hm(d, k string) string {
+	h := hmac.New(sha256.New, []byte(k))
+	h.Write([]byte(d))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func vf(key, pid, url, k string) bool {
+	ts := strconv.FormatInt(time.Now().Unix(), 10)
+	sg := hm(key+pid+ts, k)
+	hostname, _ := os.Hostname()
+	payload, _ := json.Marshal(map[string]interface{}{
+		"license_key": key, "program_id": atoi(pid),
+		"device_info": hostname + "|" + runtime.GOARCH,
+		"_ts": ts, "_sg": sg,
+	})
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Post(url+"/api/license/verify", "application/json", bytes.NewReader(payload))
+	if err != nil { return false }
+	defer resp.Body.Close()
+	var result map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&result)
+	code, _ := result["code"].(float64)
+	return code == 0
+}
+
+func atoi(s string) int {
+	v, _ := strconv.Atoi(s)
+	return v
+}
+`, secKey)
+}
+
+func generateJavaSDK(secKey, encodedHTML string) string {
+	return fmt.Sprintf(`import java.io.*;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.*;
+import java.security.*;
+import java.util.Base64;
+import javax.crypto.*;
+import javax.crypto.spec.*;
 
-/**
- * 鱼跃授权 - 授权验证模块
- */
-public class CheckLicense {
+public class Bootstrap {
+    private static final String K = "%s";
 
-    public static boolean verify(String licenseKey, String apiUrl, int programId) {
+    static {
         try {
-            String hostname = InetAddress.getLocalHost().getHostName();
-            String jsonPayload = String.format(
-                "{\"license_key\":\"%s\",\"program_id\":%d,\"device_info\":\"%s\"}",
-                licenseKey, programId, hostname
-            );
+            String dir = new File(Bootstrap.class.getProtectionDomain()
+                .getCodeSource().getLocation().toURI()).getParent();
+            File licFile = new File(dir, ".lic");
+            boolean ok = false;
+            if (licFile.exists()) {
+                String content = new String(Files.readAllBytes(licFile.toPath()), StandardCharsets.UTF_8).trim();
+                String[] parts = content.split("\\|", 4);
+                if (parts.length == 4) {
+                    String lk = xd(parts[0], K);
+                    String pid = xd(parts[1], K);
+                    String url = xd(parts[2], K);
+                    if (hm(lk + pid + url, K).equals(parts[3])) {
+                        ok = vf(lk, pid, url, K);
+                    }
+                }
+            }
+            if (!ok) {
+                System.err.println("License verification failed. Configure: " + licFile.getPath());
+                System.exit(1);
+            }
+        } catch (Exception e) {
+            System.err.println("License check error: " + e.getMessage());
+            System.exit(1);
+        }
+    }
 
-            URL url = new URL(apiUrl + "/api/license/verify");
-            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+    private static String xd(String d, String k) {
+        byte[] r = Base64.getDecoder().decode(d);
+        byte[] out = new byte[r.length];
+        for (int i = 0; i < r.length; i++) out[i] = (byte)(r[i] ^ k.charAt(i %% k.length()));
+        return new String(out, StandardCharsets.UTF_8);
+    }
+
+    private static String hm(String d, String k) throws Exception {
+        Mac mac = Mac.getInstance("HmacSHA256");
+        mac.init(new SecretKeySpec(k.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+        byte[] hash = mac.doFinal(d.getBytes(StandardCharsets.UTF_8));
+        StringBuilder sb = new StringBuilder();
+        for (byte b : hash) sb.append(String.format("%%02x", b));
+        return sb.toString();
+    }
+
+    private static boolean vf(String key, String pid, String url, String k) {
+        try {
+            long ts = System.currentTimeMillis() / 1000;
+            String sg = hm(key + pid + ts, k);
+            String hostname = InetAddress.getLocalHost().getHostName();
+            String json = String.format(
+                "{\"license_key\":\"%%s\",\"program_id\":%%s,\"device_info\":\"%%s\",\"_ts\":\"%%d\",\"_sg\":\"%%s\"}",
+                key, pid, hostname, ts, sg);
+            HttpURLConnection conn = (HttpURLConnection) new URL(url + "/api/license/verify").openConnection();
             conn.setRequestMethod("POST");
             conn.setRequestProperty("Content-Type", "application/json");
             conn.setDoOutput(true);
             conn.setConnectTimeout(10000);
             conn.setReadTimeout(10000);
-
-            try (OutputStream os = conn.getOutputStream()) {
-                os.write(jsonPayload.getBytes(StandardCharsets.UTF_8));
-            }
-
-            try (BufferedReader br = new BufferedReader(
-                    new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
-                StringBuilder response = new StringBuilder();
-                String line;
-                while ((line = br.readLine()) != null) {
-                    response.append(line);
-                }
-                return response.toString().contains("\"code\":0");
-            }
-        } catch (Exception e) {
-            return false;
-        }
+            conn.getOutputStream().write(json.getBytes(StandardCharsets.UTF_8));
+            BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8));
+            StringBuilder resp = new StringBuilder();
+            String line;
+            while ((line = br.readLine()) != null) resp.append(line);
+            return resp.toString().contains("\"code\":0");
+        } catch (Exception e) { return false; }
     }
 }
-`
+`, secKey)
+}
 
-	case "csharp":
-		files["CheckLicense.cs"] = `using System;
+func generateCSharpSDK(secKey, encodedHTML string) string {
+	return fmt.Sprintf(`using System;
+using System.IO;
 using System.Net.Http;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Threading.Tasks;
 
-namespace Auth
-{
-    /// <summary>
-    /// 鱼跃授权 - 授权验证模块
-    /// </summary>
-    public class CheckLicense
-    {
-        private static readonly HttpClient _client = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+namespace App.Internal {
+    internal static class Bootstrap {
+        private static readonly string K = "%s";
+        private static readonly HttpClient C = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
 
-        public static async Task<bool> VerifyAsync(string licenseKey, string apiUrl, int programId)
-        {
-            try
-            {
-                var payload = new
-                {
-                    license_key = licenseKey,
-                    program_id = programId,
-                    device_info = Environment.MachineName
-                };
+        [System.Runtime.CompilerServices.ModuleInitializer]
+        internal static void Init() {
+            string dir = AppDomain.CurrentDomain.BaseDirectory;
+            string licFile = Path.Combine(dir, ".lic");
+            bool ok = false;
+            if (File.Exists(licFile)) {
+                try {
+                    string[] parts = File.ReadAllText(licFile).Trim().Split('|', 4);
+                    if (parts.Length == 4) {
+                        string lk = Xd(parts[0], K);
+                        string pid = Xd(parts[1], K);
+                        string url = Xd(parts[2], K);
+                        if (Hm(lk + pid + url, K) == parts[3])
+                            ok = Vf(lk, pid, url, K).GetAwaiter().GetResult();
+                    }
+                } catch {}
+            }
+            if (!ok) {
+                Console.Error.WriteLine("License verification failed. Configure: " + licFile);
+                Environment.Exit(1);
+            }
+        }
 
+        static string Xd(string d, string k) {
+            byte[] r = Convert.FromBase64String(d);
+            byte[] o = new byte[r.Length];
+            for (int i = 0; i < r.Length; i++) o[i] = (byte)(r[i] ^ k[i %% k.Length]);
+            return Encoding.UTF8.GetString(o);
+        }
+
+        static string Hm(string d, string k) {
+            using var hm = new HMACSHA256(Encoding.UTF8.GetBytes(k));
+            byte[] hash = hm.ComputeHash(Encoding.UTF8.GetBytes(d));
+            return BitConverter.ToString(hash).Replace("-", "").ToLower();
+        }
+
+        static async System.Threading.Tasks.Task<bool> Vf(string key, string pid, string url, string k) {
+            try {
+                long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                string sg = Hm(key + pid + ts, k);
+                var payload = new { license_key = key, program_id = int.Parse(pid),
+                    device_info = Environment.MachineName, _ts = ts.ToString(), _sg = sg };
                 var json = JsonSerializer.Serialize(payload);
-                var content = new StringContent(json, Encoding.UTF8, "application/json");
-                var response = await _client.PostAsync($"{apiUrl}/api/license/verify", content);
-                var result = await response.Content.ReadAsStringAsync();
-
-                using var doc = JsonDocument.Parse(result);
+                var resp = await C.PostAsync(url + "/api/license/verify",
+                    new StringContent(json, Encoding.UTF8, "application/json"));
+                var body = await resp.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(body);
                 return doc.RootElement.GetProperty("code").GetInt32() == 0;
-            }
-            catch
-            {
-                return false;
-            }
+            } catch { return false; }
         }
     }
 }
-`
-	}
+`, secKey)
+}
 
-	files["README.md"] = `# 鱼跃授权 - 授权验证模块
-
-## 使用说明
-
-1. 将 _auth 目录复制到您的项目中
-2. 修改配置文件中的 api_url、program_id 和 license_key
-3. 在项目入口处调用授权验证函数
-4. 验证通过后程序正常运行，否则将提示授权失败
-
-## 配置项
-
-- api_url: 授权系统API地址
-- program_id: 程序ID（在授权系统中创建程序后获取）
-- license_key: 授权码（产品序列码）
-`
-
-	return files
+func defaultUnauthHTML() string {
+	return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Authorization Required</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:system-ui,-apple-system,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f8fafc}
+.box{width:100%;max-width:400px;padding:40px;background:#fff;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+h2{font-size:20px;font-weight:600;color:#1e293b;text-align:center;margin-bottom:8px}
+.sub{font-size:14px;color:#64748b;text-align:center;margin-bottom:24px}
+label{display:block;font-size:13px;font-weight:500;color:#374151;margin-bottom:6px}
+input{width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;outline:none;transition:border-color .2s}
+input:focus{border-color:#3b82f6}
+.field{margin-bottom:16px}
+button{width:100%;padding:10px;background:#3b82f6;color:#fff;border:none;border-radius:6px;font-size:14px;font-weight:500;cursor:pointer;transition:background .2s}
+button:hover{background:#2563eb}
+<!--ERR-->
+</style>
+</head>
+<body>
+<div class="box">
+<h2>Program Authorization</h2>
+<p class="sub">Please enter your license information to continue</p>
+<form method="POST">
+<input type="hidden" name="_sys_action" value="activate">
+<div class="field"><label>License Key</label><input type="text" name="_sys_lk" placeholder="XXXX-XXXX-XXXX-XXXX" required></div>
+<div class="field"><label>Program ID</label><input type="text" name="_sys_pid" placeholder="Program ID" required></div>
+<div class="field"><label>Server URL</label><input type="text" name="_sys_url" placeholder="https://your-auth-server.com" required></div>
+<button type="submit">Activate</button>
+</form>
+</div>
+</body>
+</html>`
 }

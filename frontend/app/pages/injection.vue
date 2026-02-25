@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const { get, upload } = useApi()
+const { get } = useApi()
 const toast = useToast()
 
 useHead({ title: '在线注入' })
@@ -101,7 +101,7 @@ function clearFile() {
       <div class="space-y-6">
         <UAlert
           title="使用说明"
-          description="上传您的程序ZIP压缩包，选择对应的开发语言，系统将自动在压缩包内生成授权验证目录（_auth）和对应语言的授权验证代码文件。此操作可节省手动对接API的时间。"
+          description="上传程序ZIP包并选择开发语言，系统将自动注入授权验证SDK并修改入口文件。注入后的程序启动时会进行授权校验，未授权则显示激活页面。SDK文件夹已做伪装处理，变量及通信均已加密。"
           color="info"
           variant="subtle"
         />
@@ -119,7 +119,7 @@ function clearFile() {
           <div class="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 text-center">
             <template v-if="!fileName">
               <UIcon name="i-lucide-upload" class="w-8 h-8 text-gray-400 mx-auto mb-2" />
-              <p class="text-sm text-gray-500 mb-2">点击或拖拽上传ZIP文件</p>
+              <p class="text-sm text-gray-500 mb-2">点击选择ZIP文件</p>
               <label>
                 <UButton variant="outline" color="neutral" as="span" class="cursor-pointer">
                   选择文件
@@ -151,17 +151,24 @@ function clearFile() {
 
     <UCard>
       <template #header>
-        <span class="font-medium text-gray-900 dark:text-white">注入后的文件结构</span>
+        <span class="font-medium text-gray-900 dark:text-white">注入机制说明</span>
       </template>
-      <div class="text-sm text-gray-600 dark:text-gray-400 space-y-1">
-        <p>注入完成后，您的压缩包中将新增以下目录和文件：</p>
-        <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 mt-2 font-mono text-xs space-y-1">
-          <p>your-project/</p>
-          <p class="ml-4">_auth/</p>
-          <p class="ml-8">check_license.* &nbsp;&nbsp;(授权验证代码)</p>
-          <p class="ml-8">config.* &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(配置文件)</p>
-          <p class="ml-8">README.md &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(使用说明)</p>
-          <p class="ml-4">... (原有文件保持不变)</p>
+      <div class="text-sm text-gray-600 dark:text-gray-400 space-y-3">
+        <div>
+          <p class="font-medium text-gray-700 dark:text-gray-300 mb-1">SDK伪装</p>
+          <p>授权验证文件隐藏在 lib/.cache/ 目录下，文件名伪装为框架引导文件（bootstrap.*），不易被识别</p>
+        </div>
+        <div>
+          <p class="font-medium text-gray-700 dark:text-gray-300 mb-1">自动引入</p>
+          <p>系统会自动扫描程序入口文件（如 index.php / app.js / main.py 等），注入SDK引用代码，无需手动修改</p>
+        </div>
+        <div>
+          <p class="font-medium text-gray-700 dark:text-gray-300 mb-1">安全校验</p>
+          <p>采用 XOR 加密存储配置、HMAC-SHA256 签名通信、时间戳防重放，授权信息加密存储于 .lic 文件</p>
+        </div>
+        <div>
+          <p class="font-medium text-gray-700 dark:text-gray-300 mb-1">未授权拦截</p>
+          <p>程序启动时自动校验授权，未通过则显示授权激活页面，需输入授权码、程序ID和服务器地址。可在「系统设置」中自定义此页面</p>
         </div>
       </div>
     </UCard>

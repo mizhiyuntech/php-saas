@@ -127,6 +127,32 @@ func GetSiteInfo(c *gin.Context) {
 	utils.Success(c, result)
 }
 
+func GetUnauthPageHTML(c *gin.Context) {
+	html := models.GetSetting("unauth_page_html")
+	utils.Success(c, gin.H{"html": html})
+}
+
+func UpdateUnauthPageHTML(c *gin.Context) {
+	var req struct {
+		HTML string `json:"html"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.ErrorBad(c, "参数错误")
+		return
+	}
+
+	var setting models.Setting
+	result := config.DB.Where("`key` = ?", "unauth_page_html").First(&setting)
+	if result.Error != nil {
+		setting = models.Setting{Group: "system", Key: "unauth_page_html", Value: req.HTML}
+		config.DB.Create(&setting)
+	} else {
+		config.DB.Model(&setting).Update("value", req.HTML)
+	}
+
+	utils.SuccessMsg(c, "保存成功")
+}
+
 func GetDashboardStats(c *gin.Context) {
 	var programCount, licenseCount, activeLicenseCount, orderCount int64
 

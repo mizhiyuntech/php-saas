@@ -56,5 +56,7 @@ func Setup(r *gin.Engine) {
 		admin.PUT("/settings", controllers.UpdateSettings)
 		admin.POST("/settings/upload-icon", controllers.UploadIcon)
 		admin.POST("/settings/upload-favicon", controllers.UploadFavicon)
+		admin.GET("/settings/unauth-page", controllers.GetUnauthPageHTML)
+		admin.PUT("/settings/unauth-page", controllers.UpdateUnauthPageHTML)
 	}
 }
