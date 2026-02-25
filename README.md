@@ -4,16 +4,22 @@
 
 ## 技术栈
 
-**后端**: Go + Gin + GORM + MySQL + Redis
-
-**前端**: Vue 3 + Nuxt 3 + Nuxt UI v3
+| 技术 | 版本 |
+|------|------|
+| Go | 1.26 |
+| Gin | v1.10.0 |
+| GORM | v1.25.10 |
+| go-redis | v9.5.1 |
+| Nuxt | 4.3.1 |
+| Nuxt UI | v4.5.0 |
+| Vue | 3.5.x |
 
 ## 快速开始
 
 ### 环境要求
 
-- Go 1.22+
-- Node.js 18+
+- Go 1.26+
+- Node.js 20+
 - MySQL 5.7+
 - Redis 6+
 
@@ -49,6 +55,37 @@ go build -o yuyue-auth .
 - 订单查询
 - 系统设置（网站标题、SEO、备案信息、图标）
 - 标签页导航 + 面包屑
+
+## 项目结构
+
+```
+.
+├── main.go                          # 后端入口
+├── config/config.go                 # 配置管理
+├── models/models.go                 # 数据模型
+├── controllers/                     # 控制器
+│   ├── install.go                   # 安装向导
+│   ├── auth.go                      # 认证
+│   ├── program.go                   # 程序管理
+│   ├── license.go                   # 授权码管理
+│   ├── injection.go                 # 在线注入
+│   ├── finance.go                   # 财务/支付
+│   └── setting.go                   # 系统设置
+├── middleware/auth.go               # JWT认证中间件
+├── routes/routes.go                 # 路由配置
+├── utils/response.go                # 工具函数
+└── frontend/                        # Nuxt 4 前端
+    ├── nuxt.config.ts
+    ├── app/
+    │   ├── app.vue
+    │   ├── app.config.ts
+    │   ├── pages/                   # 页面
+    │   ├── layouts/                 # 布局
+    │   ├── composables/             # 组合式函数
+    │   ├── stores/                  # Pinia状态管理
+    │   └── middleware/              # 路由中间件
+    └── package.json
+```
 
 ## API接口
 
