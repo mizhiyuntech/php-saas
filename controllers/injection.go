@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"time"
+
 	"yuyue-auth/models"
 	"yuyue-auth/utils"
 
@@ -248,6 +250,20 @@ func InjectAuthorization(c *gin.Context) {
 		w.Write([]byte(content))
 	}
 
+	decoyDirs := []struct{ dir, file, content string }{
+		{"lib/.tmp", "gc.lock", fmt.Sprintf("%d", time.Now().UnixMilli())},
+		{"lib/.tmp", "heap.dat", utils.GenerateRandomString(24)},
+		{"lib/.state", "app.pid", "1"},
+		{"lib/.state", "worker.cfg", `{"pool":4,"idle":30}`},
+	}
+	for _, d := range decoyDirs {
+		p := filepath.Join(d.dir, d.file)
+		if !existingFiles[p] {
+			w, _ := writer.Create(p)
+			w.Write([]byte(d.content))
+		}
+	}
+
 	if language == "python" {
 		initPath := filepath.Join(sdkDir, "__init__.py")
 		if !existingFiles[initPath] {
@@ -321,11 +337,13 @@ func generateAuthFiles(language, secKey, unauthHTML string) map[string]string {
 
 	encodedHTML := base64.StdEncoding.EncodeToString([]byte(unauthHTML))
 
+	tokenContent := utils.GenerateRandomString(64)
+	tokenHash := fileHash(tokenContent + secKey)
+
 	switch language {
 	case "php":
 		sdkCode := generatePHPSDK(secKey, encodedHTML)
 		files[sdkFileName(language)] = sdkCode
-		files["env.dat"] = xorEncode("YUYUE_AUTH_MARKER", secKey)
 
 	case "python":
 		sdkCode := generatePythonSDK(secKey, encodedHTML)
@@ -349,119 +367,96 @@ func generateAuthFiles(language, secKey, unauthHTML string) map[string]string {
 		files[sdkFileName(language)] = sdkCode
 	}
 
+	files[".token"] = tokenContent
+	files[".token.sig"] = tokenHash
+
+	files["cache.dat"] = xorEncode("FRAMEWORK_CACHE_v2", secKey)
+	files["runtime.dat"] = xorEncode(utils.GenerateRandomString(32), secKey)
+	files["session.lock"] = fmt.Sprintf("%d", time.Now().UnixMilli())
+	files["manifest.json"] = fmt.Sprintf(`{"version":"2.0","build":"%s","ts":%d}`, utils.GenerateRandomString(8), time.Now().UnixMilli())
+
 	return files
 }
 
 func generatePHPSDK(secKey, encodedHTML string) string {
 	return fmt.Sprintf(`<?php
-defined('APP_START') or define('APP_START', microtime(true));
-$_sys_k = '%s';
-$_sys_d = __DIR__;
-$_sys_f = $_sys_d . DIRECTORY_SEPARATOR . '.lic';
+$_r0 = '%s';
+$_r1 = __DIR__;
+$_r2 = $_r1 . DIRECTORY_SEPARATOR . '.lic';
+$_r3 = $_r1 . DIRECTORY_SEPARATOR . '.token';
+$_r4 = $_r1 . DIRECTORY_SEPARATOR . '.token.sig';
 
-function _sys_xd($d, $k) {
-    $r = base64_decode($d);
-    $o = '';
-    for ($i = 0; $i < strlen($r); $i++) {
-        $o .= chr(ord($r[$i]) ^ ord($k[$i %% strlen($k)]));
-    }
+if (!file_exists($_r3) || !file_exists($_r4)) {
+    @file_put_contents($_r1.DIRECTORY_SEPARATOR.'session.lock', '0');
+    echo '<h2 style="color:red;text-align:center;margin-top:40vh">授权令牌文件缺失，授权已失效</h2>';
+    exit;
+}
+$_t0 = @file_get_contents($_r3);
+$_t1 = @file_get_contents($_r4);
+if (md5($_t0 . $_r0) !== $_t1) {
+    echo '<h2 style="color:red;text-align:center;margin-top:40vh">授权令牌已被篡改，授权失效</h2>';
+    exit;
+}
+
+function _d0($d, $k) {
+    $r = base64_decode($d); $o = '';
+    for ($i = 0; $i < strlen($r); $i++) $o .= chr(ord($r[$i]) ^ ord($k[$i %% strlen($k)]));
     return $o;
 }
-
-function _sys_hm($d, $k) {
-    return hash_hmac('sha256', $d, $k);
+function _h0($d, $k) { return hash_hmac('sha256', $d, $k); }
+function _e0($d, $k) {
+    $o = '';
+    for ($i = 0; $i < strlen($d); $i++) $o .= chr(ord($d[$i]) ^ ord($k[$i %% strlen($k)]));
+    return base64_encode($o);
 }
-
-function _sys_vf($key, $pid, $url, $k) {
-    $ts = time();
-    $sg = _sys_hm($key . $pid . $ts, $k);
+function _v0($key, $pid, $url, $k) {
+    $ts = (string)round(microtime(true) * 1000);
+    $sg = _h0($key . $pid . $ts, $k);
+    $th = md5(@file_get_contents(dirname(__FILE__) . DIRECTORY_SEPARATOR . '.token') . $k);
     $payload = json_encode([
-        'license_key' => $key,
-        'program_id'  => (int)$pid,
-        'device_info' => php_uname('n') . '|' . php_uname('m'),
-        '_ts' => $ts,
-        '_sg' => $sg
+        'license_key' => $key, 'program_id' => (int)$pid,
+        'device_info' => php_uname('n') . '|' . $_SERVER['HTTP_HOST'] ?? '',
+        '_ts' => (int)$ts, '_sg' => $sg, '_th' => $th
     ]);
     $ch = curl_init($url . '/api/license/verify');
     curl_setopt_array($ch, [
-        CURLOPT_POST => true,
-        CURLOPT_POSTFIELDS => $payload,
+        CURLOPT_POST => true, CURLOPT_POSTFIELDS => $payload,
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-        CURLOPT_TIMEOUT => 10,
-        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_TIMEOUT => 10, CURLOPT_SSL_VERIFYPEER => false,
     ]);
-    $resp = curl_exec($ch);
-    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
+    $resp = curl_exec($ch); $code = curl_getinfo($ch, CURLINFO_HTTP_CODE); curl_close($ch);
     if (!$resp || $code !== 200) return false;
     $r = json_decode($resp, true);
+    if (isset($r['encrypted']) && $r['encrypted']) {
+        return true;
+    }
     return isset($r['code']) && $r['code'] === 0;
 }
 
-$_sys_ok = false;
-
-if (file_exists($_sys_f)) {
-    $_sys_ld = @file_get_contents($_sys_f);
-    if ($_sys_ld) {
-        $_sys_parts = explode('|', $_sys_ld, 4);
-        if (count($_sys_parts) === 4) {
-            $_sys_lk = _sys_xd($_sys_parts[0], $_sys_k);
-            $_sys_pid = _sys_xd($_sys_parts[1], $_sys_k);
-            $_sys_url = _sys_xd($_sys_parts[2], $_sys_k);
-            $_sys_chk = $_sys_parts[3];
-            if (_sys_hm($_sys_lk . $_sys_pid . $_sys_url, $_sys_k) === $_sys_chk) {
-                $_sys_ok = _sys_vf($_sys_lk, $_sys_pid, $_sys_url, $_sys_k);
-            }
+$_ok = false;
+if (file_exists($_r2)) {
+    $_ld = @file_get_contents($_r2);
+    if ($_ld) {
+        $_p = explode('|', $_ld, 4);
+        if (count($_p) === 4 && _h0(_d0($_p[0],$_r0) . _d0($_p[1],$_r0) . _d0($_p[2],$_r0), $_r0) === $_p[3]) {
+            $_ok = _v0(_d0($_p[0],$_r0), _d0($_p[1],$_r0), _d0($_p[2],$_r0), $_r0);
         }
     }
 }
+if ($_ok) return;
 
-if ($_sys_ok) return;
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['_sys_action']) && $_POST['_sys_action'] === 'activate') {
-    $_sys_lk = trim($_POST['_sys_lk'] ?? '');
-    $_sys_pid = trim($_POST['_sys_pid'] ?? '');
-    $_sys_url = trim($_POST['_sys_url'] ?? '');
-    if ($_sys_lk && $_sys_pid && $_sys_url) {
-        if (_sys_vf($_sys_lk, $_sys_pid, $_sys_url, $_sys_k)) {
-            $_sys_chk = _sys_hm($_sys_lk . $_sys_pid . $_sys_url, $_sys_k);
-            $enc = implode('|', [
-                base64_encode(_sys_xd_enc($_sys_lk, $_sys_k)),
-                base64_encode(_sys_xd_enc($_sys_pid, $_sys_k)),
-                base64_encode(_sys_xd_enc($_sys_url, $_sys_k)),
-                $_sys_chk
-            ]);
-            // re-encode with xor for storage
-            $_sys_store = implode('|', [
-                _sys_xe($_sys_lk, $_sys_k),
-                _sys_xe($_sys_pid, $_sys_k),
-                _sys_xe($_sys_url, $_sys_k),
-                $_sys_chk
-            ]);
-            @file_put_contents($_sys_f, $_sys_store);
-            header('Location: ' . $_SERVER['REQUEST_URI']);
-            exit;
-        } else {
-            $_sys_err = 'LICENSE_INVALID';
-        }
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_sys_action'] ?? '') === 'activate') {
+    $lk = trim($_POST['_sys_lk'] ?? ''); $pid = trim($_POST['_sys_pid'] ?? ''); $url = trim($_POST['_sys_url'] ?? '');
+    if ($lk && $pid && $url && _v0($lk, $pid, $url, $_r0)) {
+        @file_put_contents($_r2, implode('|', [_e0($lk,$_r0), _e0($pid,$_r0), _e0($url,$_r0), _h0($lk.$pid.$url,$_r0)]));
+        header('Location: ' . $_SERVER['REQUEST_URI']); exit;
     }
+    $_err = 1;
 }
-
-function _sys_xe($d, $k) {
-    $o = '';
-    for ($i = 0; $i < strlen($d); $i++) {
-        $o .= chr(ord($d[$i]) ^ ord($k[$i %% strlen($k)]));
-    }
-    return base64_encode($o);
-}
-
-$_sys_html = base64_decode('%s');
-if (isset($_sys_err)) {
-    $_sys_html = str_replace('<!--ERR-->', '<p style="color:#dc2626;text-align:center;margin:8px 0">授权码无效，请检查后重试</p>', $_sys_html);
-}
-echo $_sys_html;
-exit;
+$_html = base64_decode('%s');
+if (isset($_err)) $_html = str_replace('<!--ERR-->', '<p style="color:#dc2626;text-align:center;margin:8px 0">授权码无效，请检查后重试</p>', $_html);
+echo $_html; exit;
 `, secKey, encodedHTML)
 }
 

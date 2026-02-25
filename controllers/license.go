@@ -142,12 +142,27 @@ func VerifyLicense(c *gin.Context) {
 		LicenseKey string `json:"license_key" binding:"required"`
 		ProgramID  uint   `json:"program_id" binding:"required"`
 		DeviceInfo string `json:"device_info"`
+		Timestamp  int64  `json:"_ts"`
+		Signature  string `json:"_sg"`
+		TokenHash  string `json:"_th"`
 	}
 
 	var req VerifyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		utils.ErrorBad(c, "参数错误")
 		return
+	}
+
+	nowMs := time.Now().UnixMilli()
+	if req.Timestamp > 0 {
+		diff := nowMs - req.Timestamp
+		if diff < 0 {
+			diff = -diff
+		}
+		if diff > 300000 {
+			utils.Error(c, 403, "请求已过期")
+			return
+		}
 	}
 
 	var license models.License
@@ -184,12 +199,18 @@ func VerifyLicense(c *gin.Context) {
 			updates["expires_at"] = expiresAt
 		}
 		config.DB.Model(&license).Updates(updates)
+		config.DB.First(&license, license.ID)
 	}
 
+	serverTs := time.Now().UnixMilli()
+	responseToken := utils.GenerateRandomString(16)
+
 	utils.Success(c, gin.H{
-		"valid":      true,
+		"valid":       true,
 		"license_key": license.LicenseKey,
-		"expires_at": license.ExpiresAt,
-		"status":     license.Status,
+		"expires_at":  license.ExpiresAt,
+		"status":      license.Status,
+		"server_ts":   serverTs,
+		"token":       responseToken,
 	})
 }

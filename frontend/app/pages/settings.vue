@@ -7,6 +7,18 @@ useHead({ title: '系统设置' })
 
 const loading = ref(true)
 const saving = ref(false)
+const savingEncrypt = ref(false)
+
+const encryptForm = reactive({
+  mode: 'none',
+  key: ''
+})
+
+const encryptModes = [
+  { label: '不加密', value: 'none' },
+  { label: '全局加密（所有接口）', value: 'full' },
+  { label: '部分加密（仅核心接口）', value: 'partial' }
+]
 
 const form = reactive({
   site_title: '',
@@ -22,12 +34,41 @@ const form = reactive({
 async function fetchSettings() {
   loading.value = true
   try {
-    const res = await get('/api/settings')
-    if (res.code === 0 && res.data) {
-      Object.assign(form, res.data)
+    const [settingsRes, encRes] = await Promise.all([
+      get('/api/settings'),
+      get('/api/settings/encrypt')
+    ])
+    if (settingsRes.code === 0 && settingsRes.data) Object.assign(form, settingsRes.data)
+    if (encRes.code === 0 && encRes.data) {
+      encryptForm.mode = encRes.data.mode || 'none'
+      encryptForm.key = encRes.data.key || ''
     }
   } finally {
     loading.value = false
+  }
+}
+
+async function handleSaveEncrypt() {
+  if (encryptForm.mode !== 'none' && encryptForm.key.length < 16) {
+    toast.add({ title: '加密密钥至少16位', color: 'error' })
+    return
+  }
+  savingEncrypt.value = true
+  try {
+    const res = await put('/api/settings/encrypt', encryptForm)
+    if (res.code === 0) toast.add({ title: '保存成功', color: 'success' })
+    else toast.add({ title: res.message, color: 'error' })
+  } finally {
+    savingEncrypt.value = false
+  }
+}
+
+async function generateKey() {
+  const { post } = useApi()
+  const res = await post('/api/settings/encrypt/generate-key')
+  if (res.code === 0) {
+    encryptForm.key = res.data.key
+    toast.add({ title: '密钥已生成', color: 'success' })
   }
 }
 
@@ -181,5 +222,37 @@ onMounted(fetchSettings)
     <div class="flex justify-end">
       <UButton size="lg" :loading="saving" @click="handleSave">保存设置</UButton>
     </div>
+
+    <UCard>
+      <template #header>
+        <span class="font-medium text-gray-900 dark:text-white">接口加密</span>
+      </template>
+      <div class="space-y-4">
+        <UAlert
+          title="说明"
+          description="开启后，授权验证和盗版检测等接口的请求/响应数据将使用AES-256-GCM加密传输，防止中间人拦截和明文嗅探。注入的SDK会自动适配加密模式。"
+          color="info"
+          variant="subtle"
+        />
+        <UFormField label="加密模式">
+          <USelect v-model="encryptForm.mode" :items="encryptModes" value-key="value" />
+        </UFormField>
+        <UFormField v-if="encryptForm.mode !== 'none'" label="加密密钥" hint="至少16位，建议32位">
+          <div class="flex gap-2">
+            <UInput v-model="encryptForm.key" class="flex-1 font-mono" placeholder="加密密钥" />
+            <UButton variant="outline" color="neutral" @click="generateKey">生成</UButton>
+          </div>
+        </UFormField>
+        <div v-if="encryptForm.mode !== 'none'" class="text-xs text-gray-500 space-y-1">
+          <p v-if="encryptForm.mode === 'full'">全局加密：所有验证接口均加密</p>
+          <p v-if="encryptForm.mode === 'partial'">部分加密：仅加密 /api/license/verify、/api/piracy/check、/api/auth/login</p>
+        </div>
+      </div>
+      <template #footer>
+        <div class="flex justify-end">
+          <UButton :loading="savingEncrypt" @click="handleSaveEncrypt">保存加密配置</UButton>
+        </div>
+      </template>
+    </UCard>
   </div>
 </template>

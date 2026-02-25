@@ -127,6 +127,8 @@ func InitDefaultSettings() error {
 		{Group: "system", Key: "unauth_page_html", Value: ""},
 		{Group: "system", Key: "piracy_page_html", Value: ""},
 		{Group: "system", Key: "smtp_config", Value: ""},
+		{Group: "system", Key: "api_encrypt_mode", Value: "none"},
+		{Group: "system", Key: "api_encrypt_key", Value: ""},
 	}
 
 	for _, s := range defaults {

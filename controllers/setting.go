@@ -127,6 +127,46 @@ func GetSiteInfo(c *gin.Context) {
 	utils.Success(c, result)
 }
 
+func GetEncryptConfig(c *gin.Context) {
+	utils.Success(c, gin.H{
+		"mode": models.GetSetting("api_encrypt_mode"),
+		"key":  models.GetSetting("api_encrypt_key"),
+	})
+}
+
+func UpdateEncryptConfig(c *gin.Context) {
+	var req struct {
+		Mode string `json:"mode" binding:"required"`
+		Key  string `json:"key"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.ErrorBad(c, "参数错误")
+		return
+	}
+
+	if req.Mode != "none" && req.Mode != "full" && req.Mode != "partial" {
+		utils.ErrorBad(c, "加密模式无效")
+		return
+	}
+
+	if req.Mode != "none" && len(req.Key) < 16 {
+		utils.ErrorBad(c, "密钥长度至少16位")
+		return
+	}
+
+	models.SetSetting("api_encrypt_mode", req.Mode)
+	if req.Key != "" {
+		models.SetSetting("api_encrypt_key", req.Key)
+	}
+
+	utils.SuccessMsg(c, "保存成功")
+}
+
+func GenerateEncryptKey(c *gin.Context) {
+	key := utils.GenerateRandomString(32)
+	utils.Success(c, gin.H{"key": key})
+}
+
 func GetUnauthPageHTML(c *gin.Context) {
 	html := models.GetSetting("unauth_page_html")
 	utils.Success(c, gin.H{"html": html})
