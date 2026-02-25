@@ -39,7 +39,7 @@ async function handleLogin() {
 </script>
 
 <template>
-  <div class="w-full max-w-sm">
+  <div class="w-full max-w-sm mx-auto">
     <UCard>
       <template #header>
         <div class="text-center">
@@ -50,10 +50,10 @@ async function handleLogin() {
 
       <div class="space-y-4">
         <UFormField label="用户名">
-          <UInput v-model="form.username" placeholder="请输入用户名" @keyup.enter="handleLogin" />
+          <UInput v-model="form.username" class="w-full" placeholder="请输入用户名" @keyup.enter="handleLogin" />
         </UFormField>
         <UFormField label="密码">
-          <UInput v-model="form.password" type="password" placeholder="请输入密码" @keyup.enter="handleLogin" />
+          <UInput v-model="form.password" class="w-full" type="password" placeholder="请输入密码" @keyup.enter="handleLogin" />
         </UFormField>
       </div>
 

@@ -6,6 +6,9 @@ const settingsStore = useSettingsStore()
 const authStore = useAuthStore()
 const toast = useToast()
 
+const sidebarCollapsed = ref(false)
+const mobileMenuOpen = ref(false)
+
 const menuItems = [
   { id: 'dashboard', label: '仪表盘', icon: 'i-lucide-layout-dashboard', path: '/' },
   { id: 'programs', label: '程序管理', icon: 'i-lucide-box', path: '/programs' },
@@ -26,12 +29,27 @@ const menuItems = [
 const expandedGroups = ref<string[]>(['finance'])
 
 function toggleGroup(id: string) {
+  if (sidebarCollapsed.value) {
+    sidebarCollapsed.value = false
+    if (!expandedGroups.value.includes(id)) {
+      expandedGroups.value.push(id)
+    }
+    return
+  }
   const idx = expandedGroups.value.indexOf(id)
   if (idx >= 0) {
     expandedGroups.value.splice(idx, 1)
   } else {
     expandedGroups.value.push(id)
   }
+}
+
+function toggleSidebar() {
+  sidebarCollapsed.value = !sidebarCollapsed.value
+}
+
+function toggleMobileMenu() {
+  mobileMenuOpen.value = !mobileMenuOpen.value
 }
 
 const breadcrumbItems = computed(() => {
@@ -61,6 +79,7 @@ function navigateToMenu(item: { id: string; label: string; path: string }) {
     closable: item.id !== 'dashboard'
   })
   router.push(item.path)
+  mobileMenuOpen.value = false
 }
 
 function switchTab(tab: { id: string; path: string }) {
@@ -144,27 +163,54 @@ watch(() => route.path, (newPath) => {
 
 <template>
   <div class="flex h-screen bg-gray-50 dark:bg-gray-950">
+    <!-- Mobile overlay backdrop -->
+    <div
+      v-if="mobileMenuOpen"
+      class="fixed inset-0 z-30 bg-black/50 lg:hidden"
+      @click="mobileMenuOpen = false"
+    />
+
     <!-- Sidebar -->
-    <aside class="w-60 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col shrink-0">
-      <div class="h-14 flex items-center px-4 border-b border-gray-200 dark:border-gray-800">
-        <span class="text-lg font-bold text-primary-600 dark:text-primary-400">{{ settingsStore.siteTitle }}</span>
+    <aside
+      class="bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col shrink-0 transition-all duration-200 z-40"
+      :class="[
+        sidebarCollapsed ? 'w-14' : 'w-60',
+        mobileMenuOpen ? 'fixed inset-y-0 left-0' : 'hidden lg:flex'
+      ]"
+    >
+      <!-- Sidebar header -->
+      <div class="h-14 flex items-center border-b border-gray-200 dark:border-gray-800" :class="sidebarCollapsed ? 'justify-center px-2' : 'px-4'">
+        <span v-if="!sidebarCollapsed" class="text-lg font-bold text-primary-600 dark:text-primary-400 truncate">{{ settingsStore.siteTitle }}</span>
+        <UButton
+          v-if="sidebarCollapsed"
+          icon="i-lucide-panel-right-open"
+          variant="ghost"
+          color="neutral"
+          size="xs"
+          @click="toggleSidebar"
+        />
       </div>
 
+      <!-- Nav -->
       <nav class="flex-1 overflow-y-auto p-2 space-y-0.5">
         <template v-for="item in menuItems" :key="item.id">
           <template v-if="item.children">
             <button
-              class="w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+              class="w-full flex items-center rounded-md text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+              :class="sidebarCollapsed ? 'justify-center px-2 py-2' : 'gap-2 px-3 py-2'"
+              :title="sidebarCollapsed ? item.label : undefined"
               @click="toggleGroup(item.id)"
             >
               <UIcon :name="item.icon" class="w-4 h-4 shrink-0" />
-              <span class="flex-1 text-left">{{ item.label }}</span>
-              <UIcon
-                :name="expandedGroups.includes(item.id) ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'"
-                class="w-4 h-4 shrink-0"
-              />
+              <template v-if="!sidebarCollapsed">
+                <span class="flex-1 text-left">{{ item.label }}</span>
+                <UIcon
+                  :name="expandedGroups.includes(item.id) ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'"
+                  class="w-4 h-4 shrink-0"
+                />
+              </template>
             </button>
-            <div v-show="expandedGroups.includes(item.id)" class="ml-4 space-y-0.5">
+            <div v-if="!sidebarCollapsed" v-show="expandedGroups.includes(item.id)" class="ml-4 space-y-0.5">
               <button
                 v-for="child in item.children"
                 :key="child.id"
@@ -181,49 +227,68 @@ watch(() => route.path, (newPath) => {
           </template>
           <template v-else>
             <button
-              class="w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors"
-              :class="route.path === item.path
-                ? 'bg-primary-50 dark:bg-primary-950 text-primary-600 dark:text-primary-400 font-medium'
-                : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'"
+              class="w-full flex items-center rounded-md text-sm transition-colors"
+              :class="[
+                sidebarCollapsed ? 'justify-center px-2 py-2' : 'gap-2 px-3 py-2',
+                route.path === item.path
+                  ? 'bg-primary-50 dark:bg-primary-950 text-primary-600 dark:text-primary-400 font-medium'
+                  : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+              ]"
+              :title="sidebarCollapsed ? item.label : undefined"
               @click="navigateToMenu(item as any)"
             >
               <UIcon :name="item.icon" class="w-4 h-4 shrink-0" />
-              <span>{{ item.label }}</span>
+              <span v-if="!sidebarCollapsed">{{ item.label }}</span>
             </button>
           </template>
         </template>
       </nav>
 
-      <div class="p-3 border-t border-gray-200 dark:border-gray-800">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <UIcon name="i-lucide-user" class="w-4 h-4 text-gray-500" />
-            <span class="text-sm text-gray-600 dark:text-gray-400">{{ authStore.username }}</span>
+      <!-- Sidebar footer -->
+      <div class="p-2 border-t border-gray-200 dark:border-gray-800">
+        <template v-if="sidebarCollapsed">
+          <div class="flex flex-col items-center gap-1">
+            <UButton icon="i-lucide-lock" variant="ghost" color="neutral" size="xs" @click="openChangePassword" />
+            <UButton icon="i-lucide-log-out" variant="ghost" color="neutral" size="xs" @click="handleLogout" />
           </div>
-          <div class="flex items-center gap-0.5">
-            <UButton
-              icon="i-lucide-lock"
-              variant="ghost"
-              color="neutral"
-              size="xs"
-              @click="openChangePassword"
-            />
-            <UButton
-              icon="i-lucide-log-out"
-              variant="ghost"
-              color="neutral"
-              size="xs"
-              @click="handleLogout"
-            />
+        </template>
+        <template v-else>
+          <div class="flex items-center justify-between px-1">
+            <div class="flex items-center gap-2 min-w-0">
+              <UIcon name="i-lucide-user" class="w-4 h-4 text-gray-500 shrink-0" />
+              <span class="text-sm text-gray-600 dark:text-gray-400 truncate">{{ authStore.username }}</span>
+            </div>
+            <div class="flex items-center gap-0.5 shrink-0">
+              <UButton icon="i-lucide-lock" variant="ghost" color="neutral" size="xs" @click="openChangePassword" />
+              <UButton icon="i-lucide-log-out" variant="ghost" color="neutral" size="xs" @click="handleLogout" />
+            </div>
           </div>
-        </div>
+        </template>
       </div>
     </aside>
 
     <!-- Main content -->
-    <div class="flex-1 flex flex-col overflow-hidden">
+    <div class="flex-1 flex flex-col overflow-hidden min-w-0">
       <!-- Tab bar -->
       <div class="h-10 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center px-2 gap-1 overflow-x-auto shrink-0">
+        <!-- Mobile menu toggle -->
+        <UButton
+          icon="i-lucide-menu"
+          variant="ghost"
+          color="neutral"
+          size="xs"
+          class="lg:hidden shrink-0 mr-1"
+          @click="toggleMobileMenu"
+        />
+        <!-- PC sidebar collapse toggle -->
+        <UButton
+          :icon="sidebarCollapsed ? 'i-lucide-panel-left-open' : 'i-lucide-panel-left-close'"
+          variant="ghost"
+          color="neutral"
+          size="xs"
+          class="hidden lg:inline-flex shrink-0 mr-1"
+          @click="toggleSidebar"
+        />
         <button
           v-for="tab in tabsStore.tabs"
           :key="tab.id"
