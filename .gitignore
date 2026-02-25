@@ -1,0 +1,13 @@
+yuyue-auth
+data/
+uploads/
+frontend/node_modules/
+frontend/.nuxt/
+frontend/.output/
+frontend/dist/
+*.exe
+*.dll
+*.so
+*.dylib
+.DS_Store
+.env
