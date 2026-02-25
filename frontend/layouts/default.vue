@@ -75,6 +75,50 @@ function closeTab(id: string) {
   }
 }
 
+const showPassword = ref(false)
+const pwdLoading = ref(false)
+const pwdForm = reactive({
+  old_password: '',
+  new_password: '',
+  confirm_password: ''
+})
+
+function openChangePassword() {
+  Object.assign(pwdForm, { old_password: '', new_password: '', confirm_password: '' })
+  showPassword.value = true
+}
+
+async function handleChangePassword() {
+  if (!pwdForm.old_password || !pwdForm.new_password) {
+    toast.add({ title: '请填写完整', color: 'error' })
+    return
+  }
+  if (pwdForm.new_password.length < 6) {
+    toast.add({ title: '新密码长度不能少于6位', color: 'error' })
+    return
+  }
+  if (pwdForm.new_password !== pwdForm.confirm_password) {
+    toast.add({ title: '两次密码输入不一致', color: 'error' })
+    return
+  }
+  pwdLoading.value = true
+  try {
+    const { post } = useApi()
+    const res = await post('/api/auth/change-password', {
+      old_password: pwdForm.old_password,
+      new_password: pwdForm.new_password
+    })
+    if (res.code === 0) {
+      toast.add({ title: '密码修改成功', color: 'success' })
+      showPassword.value = false
+    } else {
+      toast.add({ title: res.message, color: 'error' })
+    }
+  } finally {
+    pwdLoading.value = false
+  }
+}
+
 function handleLogout() {
   authStore.logout()
   toast.add({ title: '已退出登录', color: 'info' })
@@ -156,13 +200,22 @@ watch(() => route.path, (newPath) => {
             <UIcon name="i-lucide-user" class="w-4 h-4 text-gray-500" />
             <span class="text-sm text-gray-600 dark:text-gray-400">{{ authStore.username }}</span>
           </div>
-          <UButton
-            icon="i-lucide-log-out"
-            variant="ghost"
-            color="neutral"
-            size="xs"
-            @click="handleLogout"
-          />
+          <div class="flex items-center gap-0.5">
+            <UButton
+              icon="i-lucide-lock"
+              variant="ghost"
+              color="neutral"
+              size="xs"
+              @click="openChangePassword"
+            />
+            <UButton
+              icon="i-lucide-log-out"
+              variant="ghost"
+              color="neutral"
+              size="xs"
+              @click="handleLogout"
+            />
+          </div>
         </div>
       </div>
     </aside>
@@ -208,5 +261,38 @@ watch(() => route.path, (newPath) => {
         <span v-if="settingsStore.policeRecord">{{ settingsStore.policeRecord }}</span>
       </footer>
     </div>
+
+    <!-- Change Password Modal -->
+    <UModal v-model:open="showPassword">
+      <template #content>
+        <UCard>
+          <template #header>
+            <div class="flex items-center justify-between">
+              <span class="font-medium">修改密码</span>
+              <UButton icon="i-lucide-x" variant="ghost" color="neutral" size="xs" @click="showPassword = false" />
+            </div>
+          </template>
+
+          <div class="space-y-4">
+            <UFormField label="原密码">
+              <UInput v-model="pwdForm.old_password" type="password" placeholder="请输入原密码" />
+            </UFormField>
+            <UFormField label="新密码">
+              <UInput v-model="pwdForm.new_password" type="password" placeholder="至少6位" />
+            </UFormField>
+            <UFormField label="确认新密码">
+              <UInput v-model="pwdForm.confirm_password" type="password" placeholder="再次输入新密码" />
+            </UFormField>
+          </div>
+
+          <template #footer>
+            <div class="flex justify-end gap-2">
+              <UButton variant="outline" color="neutral" @click="showPassword = false">取消</UButton>
+              <UButton :loading="pwdLoading" @click="handleChangePassword">确定</UButton>
+            </div>
+          </template>
+        </UCard>
+      </template>
+    </UModal>
   </div>
 </template>
