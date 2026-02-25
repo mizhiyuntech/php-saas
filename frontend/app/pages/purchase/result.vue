@@ -12,6 +12,7 @@ useHead({ title: '支付结果' })
 const loading = ref(true)
 const order = ref<any>(null)
 const polling = ref(false)
+const confirming = ref(false)
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
 onMounted(async () => {
@@ -56,6 +57,26 @@ function startPolling() {
       if (pollTimer) clearInterval(pollTimer)
     }
   }, 3000)
+}
+
+async function confirmPayment() {
+  const orderNo = route.query.order_no as string
+  if (!orderNo) return
+  confirming.value = true
+  try {
+    const res = await fetch(`${baseURL}/api/public/confirm-payment/${orderNo}`, { method: 'POST' })
+    const data = await res.json()
+    if (data.code === 0 && data.data?.paid) {
+      toast.add({ title: '支付已确认', color: 'success' })
+      await fetchOrder()
+    } else {
+      toast.add({ title: data.data?.message || '支付平台尚未确认到款，请稍后再试', color: 'warning' })
+    }
+  } catch {
+    toast.add({ title: '确认失败，请稍后重试', color: 'error' })
+  } finally {
+    confirming.value = false
+  }
 }
 
 function copyKey(key: string) {
@@ -128,10 +149,14 @@ function copyKey(key: string) {
         <div class="w-16 h-16 mx-auto rounded-full bg-orange-50 dark:bg-orange-950 flex items-center justify-center">
           <UIcon name="i-lucide-clock" class="w-8 h-8 text-orange-500" :class="polling ? 'animate-pulse' : ''" />
         </div>
-        <h2 class="text-lg font-bold text-gray-900 dark:text-white">等待支付</h2>
+        <h2 class="text-lg font-bold text-gray-900 dark:text-white">等待支付确认</h2>
         <p class="text-sm text-gray-500">订单号：{{ order.order_no }}</p>
-        <p class="text-sm text-gray-400">{{ polling ? '正在等待支付结果...' : '支付完成后刷新页面查看结果' }}</p>
-        <UButton variant="outline" @click="fetchOrder">刷新状态</UButton>
+        <p class="text-sm text-gray-400">{{ polling ? '正在自动检测支付结果...' : '' }}</p>
+        <div class="flex items-center justify-center gap-2">
+          <UButton variant="outline" @click="fetchOrder">刷新状态</UButton>
+          <UButton :loading="confirming" @click="confirmPayment">我已支付，手动确认</UButton>
+        </div>
+        <p class="text-xs text-gray-400">如果已支付但未跳转，请点击「手动确认」，系统将主动查询支付平台</p>
       </div>
     </UCard>
   </div>

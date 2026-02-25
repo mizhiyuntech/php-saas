@@ -28,6 +28,7 @@ func Setup(r *gin.Engine) {
 		pub.POST("/order", controllers.PublicCreateOrder)
 		pub.GET("/order/:order_no", controllers.PublicGetOrder)
 		pub.GET("/pay-info/:order_no", controllers.PublicGetPayInfo)
+		pub.POST("/confirm-payment/:order_no", controllers.PublicConfirmPayment)
 		pub.POST("/query-license", controllers.PublicQueryLicense)
 		pub.POST("/verify-domain", controllers.PublicVerifyDomain)
 	}

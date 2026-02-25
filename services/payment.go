@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"strings"
 	"time"
 
 	"yuyue-auth/config"
@@ -260,6 +262,91 @@ func CreateWechatH5Pay(order models.Order, siteURL, clientIP string) (string, er
 	}
 
 	return resp.Response.H5Url, nil
+}
+
+func QueryAlipayTradeStatus(orderNo string) bool {
+	var pc models.PaymentConfig
+	if err := config.DB.Where("payment_type = 'alipay' AND enabled = ?", true).First(&pc).Error; err != nil {
+		return false
+	}
+	var cfg AlipayConfig
+	json.Unmarshal([]byte(pc.Config), &cfg)
+	if cfg.AppID == "" {
+		return false
+	}
+
+	client, err := alipay.NewClient(cfg.AppID, cfg.PrivateKey, cfg.IsProd)
+	if err != nil {
+		return false
+	}
+
+	bm := gopay.BodyMap{}
+	bm.Set("out_trade_no", orderNo)
+
+	resp, err := client.TradeQuery(context.Background(), bm)
+	if err != nil {
+		return false
+	}
+
+	return resp.Response.TradeStatus == "TRADE_SUCCESS" || resp.Response.TradeStatus == "TRADE_FINISHED"
+}
+
+func QueryWechatTradeStatus(orderNo string) bool {
+	var pc models.PaymentConfig
+	if err := config.DB.Where("payment_type = 'wechat' AND enabled = ?", true).First(&pc).Error; err != nil {
+		return false
+	}
+	var cfg WechatConfig
+	json.Unmarshal([]byte(pc.Config), &cfg)
+	if cfg.MchID == "" {
+		return false
+	}
+
+	client, err := wechat.NewClientV3(cfg.MchID, cfg.SerialNo, cfg.APIv3Key, cfg.PrivateKey)
+	if err != nil {
+		return false
+	}
+
+	resp, err := client.V3TransactionQueryOrder(context.Background(), wechat.OutTradeNo, orderNo)
+	if err != nil {
+		return false
+	}
+
+	return resp.Response.TradeState == "SUCCESS"
+}
+
+func QueryEpayTradeStatus(orderNo string) bool {
+	var pc models.PaymentConfig
+	if err := config.DB.Where("payment_type = 'epay' AND enabled = ?", true).First(&pc).Error; err != nil {
+		return false
+	}
+	var cfg struct {
+		APIURL     string `json:"api_url"`
+		MerchantID string `json:"merchant_id"`
+		APIKey     string `json:"api_key"`
+	}
+	json.Unmarshal([]byte(pc.Config), &cfg)
+	if cfg.APIURL == "" {
+		return false
+	}
+
+	queryURL := fmt.Sprintf("%s/api.php?act=order&pid=%s&out_trade_no=%s",
+		strings.TrimRight(cfg.APIURL, "/"), cfg.MerchantID, orderNo)
+
+	resp, err := http.Get(queryURL)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Code   int    `json:"code"`
+		Status int    `json:"status"`
+		State  string `json:"trade_status"`
+	}
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	return result.Status == 1 || result.State == "TRADE_SUCCESS"
 }
 
 func CompleteOrder(orderNo, tradeNo string) {

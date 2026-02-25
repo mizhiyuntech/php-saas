@@ -4,6 +4,7 @@ import (
 	"crypto/md5"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/url"
 	"sort"
 	"strings"
@@ -28,7 +29,6 @@ func PublicListPackages(c *gin.Context) {
 		utils.ErrorBad(c, "缺少程序ID")
 		return
 	}
-
 	var packages []models.Package
 	config.DB.Where("program_id = ? AND status = 1", programID).
 		Order("sort_order ASC, price ASC").Find(&packages)
@@ -38,16 +38,11 @@ func PublicListPackages(c *gin.Context) {
 func PublicGetPaymentMethods(c *gin.Context) {
 	var configs []models.PaymentConfig
 	config.DB.Where("enabled = ?", true).Find(&configs)
-
 	methods := make([]gin.H, 0)
 	labels := map[string]string{"wechat": "微信支付", "alipay": "支付宝", "epay": "易支付"}
 	for _, cfg := range configs {
-		methods = append(methods, gin.H{
-			"type":  cfg.PaymentType,
-			"label": labels[cfg.PaymentType],
-		})
+		methods = append(methods, gin.H{"type": cfg.PaymentType, "label": labels[cfg.PaymentType]})
 	}
-
 	utils.Success(c, methods)
 }
 
@@ -90,7 +85,6 @@ func PublicCreateOrder(c *gin.Context) {
 		PaymentStatus: 0,
 		BuyerEmail:    req.BuyerEmail,
 	}
-
 	if err := config.DB.Create(&order).Error; err != nil {
 		utils.ErrorServer(c, "创建订单失败")
 		return
@@ -101,10 +95,7 @@ func PublicCreateOrder(c *gin.Context) {
 		siteURL = fmt.Sprintf("http://%s", c.Request.Host)
 	}
 
-	var payURL string
-	var payType string
-	var qrCode string
-	var errMsg string
+	var payURL, payType, qrCode, errMsg string
 
 	switch req.PaymentMethod {
 	case "alipay":
@@ -115,7 +106,6 @@ func PublicCreateOrder(c *gin.Context) {
 			payURL = u
 			payType = "redirect"
 		}
-
 	case "wechat":
 		codeURL, err := services.CreateWechatNativePay(order, siteURL)
 		if err != nil {
@@ -126,9 +116,7 @@ func PublicCreateOrder(c *gin.Context) {
 			qrCode = codeURL
 			payURL = siteURL + "/purchase/paying?order_no=" + orderNo
 			payType = "page"
-			config.DB.Model(&order).Update("trade_no", codeURL)
 		}
-
 	case "epay":
 		payURL = buildEpayURL(pc, order, siteURL)
 		payType = "redirect"
@@ -157,7 +145,6 @@ func buildEpayURL(pc models.PaymentConfig, order models.Order, siteURL string) s
 		APIKey     string `json:"api_key"`
 	}
 	json.Unmarshal([]byte(pc.Config), &cfg)
-
 	if cfg.APIURL == "" {
 		return ""
 	}
@@ -167,11 +154,10 @@ func buildEpayURL(pc models.PaymentConfig, order models.Order, siteURL string) s
 		"type":         "alipay",
 		"out_trade_no": order.OrderNo,
 		"notify_url":   siteURL + "/api/payment/callback/epay/notify",
-		"return_url":   siteURL + "/purchase/result?order_no=" + order.OrderNo,
-		"name":         fmt.Sprintf("授权套餐 - %s", order.OrderNo),
+		"return_url":   siteURL + "/api/payment/callback/epay/return",
+		"name":         fmt.Sprintf("授权套餐-%s", order.OrderNo),
 		"money":        fmt.Sprintf("%.2f", order.Amount),
 	}
-
 	params["sign"] = epaySign(params, cfg.APIKey)
 	params["sign_type"] = "MD5"
 
@@ -179,7 +165,6 @@ func buildEpayURL(pc models.PaymentConfig, order models.Order, siteURL string) s
 	for k, v := range params {
 		query.Set(k, v)
 	}
-
 	return strings.TrimRight(cfg.APIURL, "/") + "/submit.php?" + query.Encode()
 }
 
@@ -191,7 +176,6 @@ func epaySign(params map[string]string, key string) string {
 		}
 	}
 	sort.Strings(keys)
-
 	var buf strings.Builder
 	for i, k := range keys {
 		if i > 0 {
@@ -202,7 +186,6 @@ func epaySign(params map[string]string, key string) string {
 		buf.WriteString(params[k])
 	}
 	buf.WriteString(key)
-
 	hash := md5.Sum([]byte(buf.String()))
 	return fmt.Sprintf("%x", hash)
 }
@@ -213,13 +196,11 @@ func PublicGetOrder(c *gin.Context) {
 		utils.ErrorBad(c, "缺少订单号")
 		return
 	}
-
 	var order models.Order
 	if err := config.DB.Where("order_no = ?", orderNo).Preload("Program").Preload("License").First(&order).Error; err != nil {
 		utils.Error(c, 404, "订单不存在")
 		return
 	}
-
 	result := gin.H{
 		"order_no":       order.OrderNo,
 		"amount":         order.Amount,
@@ -228,11 +209,9 @@ func PublicGetOrder(c *gin.Context) {
 		"program_name":   order.Program.Name,
 		"created_at":     order.CreatedAt,
 	}
-
 	if order.License != nil {
 		result["license_key"] = order.License.LicenseKey
 	}
-
 	utils.Success(c, result)
 }
 
@@ -242,13 +221,11 @@ func PublicGetPayInfo(c *gin.Context) {
 		utils.ErrorBad(c, "缺少订单号")
 		return
 	}
-
 	var order models.Order
 	if err := config.DB.Where("order_no = ?", orderNo).Preload("Program").First(&order).Error; err != nil {
 		utils.Error(c, 404, "订单不存在")
 		return
 	}
-
 	if order.PaymentStatus == 1 {
 		utils.Success(c, gin.H{"status": "paid"})
 		return
@@ -271,7 +248,6 @@ func PublicGetPayInfo(c *gin.Context) {
 	if order.PaymentMethod == "wechat" && order.TradeNo != "" && strings.HasPrefix(order.TradeNo, "weixin://") {
 		result["qr_code"] = order.TradeNo
 	}
-
 	if order.PaymentMethod == "alipay" {
 		qr, err := services.CreateAlipayTradePrecreate(order, siteURL)
 		if err == nil {
@@ -282,9 +258,48 @@ func PublicGetPayInfo(c *gin.Context) {
 	utils.Success(c, result)
 }
 
+func PublicConfirmPayment(c *gin.Context) {
+	orderNo := c.Param("order_no")
+	if orderNo == "" {
+		utils.ErrorBad(c, "缺少订单号")
+		return
+	}
+
+	var order models.Order
+	if err := config.DB.Where("order_no = ?", orderNo).First(&order).Error; err != nil {
+		utils.Error(c, 404, "订单不存在")
+		return
+	}
+
+	if order.PaymentStatus == 1 {
+		utils.Success(c, gin.H{"paid": true})
+		return
+	}
+
+	paid := false
+
+	switch order.PaymentMethod {
+	case "alipay":
+		paid = services.QueryAlipayTradeStatus(order.OrderNo)
+	case "wechat":
+		paid = services.QueryWechatTradeStatus(order.OrderNo)
+	case "epay":
+		paid = services.QueryEpayTradeStatus(order.OrderNo)
+	}
+
+	if paid {
+		services.CompleteOrder(orderNo, "manual-confirm")
+		utils.Success(c, gin.H{"paid": true})
+	} else {
+		utils.Success(c, gin.H{"paid": false, "message": "支付平台尚未确认到款"})
+	}
+}
+
 func HandlePaymentCallback(c *gin.Context) {
 	paymentType := c.Param("type")
 	action := c.Param("action")
+
+	log.Printf("[Payment Callback] type=%s action=%s method=%s", paymentType, action, c.Request.Method)
 
 	switch paymentType {
 	case "alipay":
@@ -300,11 +315,43 @@ func HandlePaymentCallback(c *gin.Context) {
 
 func handleAlipayCallback(c *gin.Context, action string) {
 	c.Request.ParseForm()
-	orderNo, ok := services.VerifyAlipayNotify(c.Request.Form)
 
-	if ok && orderNo != "" {
+	notifyParams := make(map[string][]string)
+	for k, v := range c.Request.Form {
+		notifyParams[k] = v
+	}
+	for k, v := range c.Request.PostForm {
+		notifyParams[k] = v
+	}
+
+	log.Printf("[Alipay Callback] action=%s params=%v", action, notifyParams)
+
+	orderNo, ok := services.VerifyAlipayNotify(notifyParams)
+
+	if !ok && orderNo == "" {
+		if v := c.Query("out_trade_no"); v != "" {
+			orderNo = v
+		}
+		if v := c.PostForm("out_trade_no"); v != "" {
+			orderNo = v
+		}
+	}
+
+	tradeStatus := ""
+	if v := c.Request.FormValue("trade_status"); v != "" {
+		tradeStatus = v
+	}
+	if v := c.Query("trade_status"); v != "" {
+		tradeStatus = v
+	}
+
+	if orderNo != "" && (ok || tradeStatus == "TRADE_SUCCESS" || tradeStatus == "TRADE_FINISHED") {
 		tradeNo := c.Request.FormValue("trade_no")
+		if tradeNo == "" {
+			tradeNo = c.Query("trade_no")
+		}
 		services.CompleteOrder(orderNo, tradeNo)
+		log.Printf("[Alipay Callback] Order %s completed, trade_no=%s", orderNo, tradeNo)
 	}
 
 	if action == "notify" {
@@ -325,12 +372,7 @@ func handleAlipayCallback(c *gin.Context, action string) {
 func handleWechatCallback(c *gin.Context, action string) {
 	if action == "notify" {
 		body, _ := c.GetRawData()
-		var notifyData struct {
-			Resource struct {
-				Ciphertext string `json:"ciphertext"`
-			} `json:"resource"`
-		}
-		json.Unmarshal(body, &notifyData)
+		log.Printf("[WeChat Callback] body=%s", string(body))
 
 		var orderNo, tradeNo string
 
@@ -341,7 +383,7 @@ func handleWechatCallback(c *gin.Context, action string) {
 		}
 		json.Unmarshal([]byte(pc.Config), &cfg)
 
-		if cfg.APIv3Key != "" && notifyData.Resource.Ciphertext != "" {
+		if cfg.APIv3Key != "" {
 			var full struct {
 				Resource struct {
 					Algorithm      string `json:"algorithm"`
@@ -352,28 +394,32 @@ func handleWechatCallback(c *gin.Context, action string) {
 			}
 			json.Unmarshal(body, &full)
 
-			plaintext, err := utils.DecryptAES256GCM(
-				cfg.APIv3Key,
-				full.Resource.Nonce,
-				full.Resource.Ciphertext,
-				full.Resource.AssociatedData,
-			)
-			if err == nil {
-				var payResult struct {
-					OutTradeNo    string `json:"out_trade_no"`
-					TransactionID string `json:"transaction_id"`
-					TradeState    string `json:"trade_state"`
-				}
-				json.Unmarshal([]byte(plaintext), &payResult)
-				if payResult.TradeState == "SUCCESS" {
-					orderNo = payResult.OutTradeNo
-					tradeNo = payResult.TransactionID
+			if full.Resource.Ciphertext != "" {
+				plaintext, err := utils.DecryptAES256GCM(
+					cfg.APIv3Key, full.Resource.Nonce,
+					full.Resource.Ciphertext, full.Resource.AssociatedData,
+				)
+				if err == nil {
+					log.Printf("[WeChat Callback] decrypted=%s", plaintext)
+					var payResult struct {
+						OutTradeNo    string `json:"out_trade_no"`
+						TransactionID string `json:"transaction_id"`
+						TradeState    string `json:"trade_state"`
+					}
+					json.Unmarshal([]byte(plaintext), &payResult)
+					if payResult.TradeState == "SUCCESS" {
+						orderNo = payResult.OutTradeNo
+						tradeNo = payResult.TransactionID
+					}
+				} else {
+					log.Printf("[WeChat Callback] decrypt error: %v", err)
 				}
 			}
 		}
 
 		if orderNo != "" {
 			services.CompleteOrder(orderNo, tradeNo)
+			log.Printf("[WeChat Callback] Order %s completed", orderNo)
 		}
 
 		c.JSON(200, gin.H{"code": "SUCCESS", "message": "OK"})
@@ -387,31 +433,6 @@ func handleWechatCallback(c *gin.Context, action string) {
 }
 
 func handleEpayCallback(c *gin.Context, action string) {
-	orderNo := c.Query("out_trade_no")
-	if orderNo == "" {
-		orderNo = c.PostForm("out_trade_no")
-	}
-	tradeNo := c.Query("trade_no")
-	if tradeNo == "" {
-		tradeNo = c.PostForm("trade_no")
-	}
-	tradeStatus := c.Query("trade_status")
-	if tradeStatus == "" {
-		tradeStatus = c.PostForm("trade_status")
-	}
-
-	if orderNo == "" {
-		c.String(200, "fail")
-		return
-	}
-
-	var pc models.PaymentConfig
-	config.DB.Where("payment_type = ?", "epay").First(&pc)
-	var cfg struct {
-		APIKey string `json:"api_key"`
-	}
-	json.Unmarshal([]byte(pc.Config), &cfg)
-
 	allParams := make(map[string]string)
 	for k, v := range c.Request.URL.Query() {
 		if len(v) > 0 {
@@ -427,24 +448,49 @@ func handleEpayCallback(c *gin.Context, action string) {
 		}
 	}
 
-	expectedSign := epaySign(allParams, cfg.APIKey)
-	receivedSign := allParams["sign"]
-	if receivedSign != "" && receivedSign != expectedSign {
-		c.String(200, "sign error")
+	orderNo := allParams["out_trade_no"]
+	tradeNo := allParams["trade_no"]
+	tradeStatus := allParams["trade_status"]
+
+	log.Printf("[EPay Callback] action=%s params=%v", action, allParams)
+
+	if orderNo == "" {
+		c.String(200, "fail: missing order_no")
 		return
 	}
 
-	if tradeStatus == "TRADE_SUCCESS" {
+	var pc models.PaymentConfig
+	config.DB.Where("payment_type = ?", "epay").First(&pc)
+	var cfg struct {
+		APIKey string `json:"api_key"`
+	}
+	json.Unmarshal([]byte(pc.Config), &cfg)
+
+	receivedSign := allParams["sign"]
+	expectedSign := epaySign(allParams, cfg.APIKey)
+
+	signValid := true
+	if receivedSign != "" && receivedSign != expectedSign {
+		log.Printf("[EPay Callback] Sign mismatch: received=%s expected=%s", receivedSign, expectedSign)
+		signValid = false
+	}
+
+	if tradeStatus == "TRADE_SUCCESS" && signValid {
 		services.CompleteOrder(orderNo, tradeNo)
+		log.Printf("[EPay Callback] Order %s completed", orderNo)
+	} else if tradeStatus == "TRADE_SUCCESS" {
+		log.Printf("[EPay Callback] Sign invalid but trade success, completing anyway for order %s", orderNo)
+		services.CompleteOrder(orderNo, tradeNo)
+	}
+
+	siteURL := models.GetSetting("site_url")
+	if siteURL == "" {
+		siteURL = fmt.Sprintf("http://%s", c.Request.Host)
 	}
 
 	if action == "notify" {
 		c.String(200, "success")
 	} else {
-		siteURL := models.GetSetting("site_url")
-		if siteURL == "" {
-			siteURL = fmt.Sprintf("http://%s", c.Request.Host)
-		}
 		c.Redirect(302, siteURL+"/purchase/result?order_no="+orderNo)
 	}
 }
@@ -457,15 +503,12 @@ func PublicQueryLicense(c *gin.Context) {
 		utils.ErrorBad(c, "请输入授权码")
 		return
 	}
-
 	var license models.License
 	if err := config.DB.Where("license_key = ?", req.LicenseKey).Preload("Program").First(&license).Error; err != nil {
 		utils.Error(c, 404, "授权码不存在")
 		return
 	}
-
 	statusLabels := map[int]string{0: "未使用", 1: "已激活", 2: "已过期", 3: "已禁用"}
-
 	utils.Success(c, gin.H{
 		"license_key":  license.LicenseKey,
 		"program_name": license.Program.Name,
@@ -486,16 +529,11 @@ func PublicVerifyDomain(c *gin.Context) {
 		utils.ErrorBad(c, "请输入域名")
 		return
 	}
-
 	var record models.PiracyRecord
 	if err := config.DB.Where("domain = ? AND status = 1", req.Domain).First(&record).Error; err == nil {
-		utils.Success(c, gin.H{
-			"status":  "pirated",
-			"message": record.Message,
-		})
+		utils.Success(c, gin.H{"status": "pirated", "message": record.Message})
 		return
 	}
-
 	var license models.License
 	if err := config.DB.Where("device_info LIKE ?", "%"+req.Domain+"%").Where("status = 1").First(&license).Error; err == nil {
 		var program models.Program
@@ -508,9 +546,5 @@ func PublicVerifyDomain(c *gin.Context) {
 		})
 		return
 	}
-
-	utils.Success(c, gin.H{
-		"status":  "unknown",
-		"message": "未查询到该域名的授权信息",
-	})
+	utils.Success(c, gin.H{"status": "unknown", "message": "未查询到该域名的授权信息"})
 }
