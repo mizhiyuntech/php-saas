@@ -52,41 +52,31 @@ func main() {
 	r.Static("/uploads", "./uploads")
 
 	frontendDist := "./frontend/.output/public"
-	if _, err := os.Stat(frontendDist); err == nil {
-		r.StaticFS("/_nuxt", http.Dir(filepath.Join(frontendDist, "_nuxt")))
+	r.StaticFS("/_nuxt", http.Dir(filepath.Join(frontendDist, "_nuxt")))
 
-		r.NoRoute(func(c *gin.Context) {
-			path := c.Request.URL.Path
+	r.NoRoute(func(c *gin.Context) {
+		path := c.Request.URL.Path
 
-			if strings.HasPrefix(path, "/api/") {
-				c.JSON(404, gin.H{"code": 404, "message": "Not found"})
-				return
-			}
+		if strings.HasPrefix(path, "/api/") {
+			c.JSON(404, gin.H{"code": 404, "message": "Not found"})
+			return
+		}
 
-			filePath := filepath.Join(frontendDist, path)
-			info, err := os.Stat(filePath)
-			if err == nil && !info.IsDir() {
-				c.File(filePath)
-				return
-			}
+		filePath := filepath.Join(frontendDist, path)
+		info, err := os.Stat(filePath)
+		if err == nil && !info.IsDir() {
+			c.File(filePath)
+			return
+		}
 
-			htmlPath := filepath.Join(frontendDist, path, "index.html")
-			if _, err := os.Stat(htmlPath); err == nil {
-				c.File(htmlPath)
-				return
-			}
+		htmlPath := filepath.Join(frontendDist, path, "index.html")
+		if _, err := os.Stat(htmlPath); err == nil {
+			c.File(htmlPath)
+			return
+		}
 
-			c.File(filepath.Join(frontendDist, "200.html"))
-		})
-	} else {
-		r.NoRoute(func(c *gin.Context) {
-			if strings.HasPrefix(c.Request.URL.Path, "/api/") {
-				c.JSON(404, gin.H{"code": 404, "message": "Not found"})
-				return
-			}
-			c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(fallbackPage()))
-		})
-	}
+		c.File(filepath.Join(frontendDist, "200.html"))
+	})
 
 	port := 3132
 	if config.Conf != nil && config.Conf.Port > 0 {
@@ -97,28 +87,4 @@ func main() {
 	if err := r.Run(fmt.Sprintf(":%d", port)); err != nil {
 		log.Fatalf("Failed to start: %v", err)
 	}
-}
-
-func fallbackPage() string {
-	return `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>YuYue Auth</title>
-<style>
-body{font-family:system-ui,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;background:#f5f5f5}
-.c{text-align:center;padding:40px;background:#fff;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.1)}
-h1{color:#333;margin-bottom:16px}
-p{color:#666}
-code{background:#f0f0f0;padding:2px 8px;border-radius:4px}
-</style>
-</head>
-<body>
-<div class="c">
-<h1>YuYue Auth System</h1>
-<p>Frontend not built. Run: cd frontend && npm install && npm run generate</p>
-</div>
-</body>
-</html>`
 }
