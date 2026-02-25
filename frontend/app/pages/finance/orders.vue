@@ -10,8 +10,8 @@ const page = ref(1)
 const totalAmount = ref(0)
 
 const filterOrderNo = ref('')
-const filterMethod = ref('')
-const filterStatus = ref('')
+const filterMethod = ref('all')
+const filterStatus = ref('all')
 const filterStartDate = ref('')
 const filterEndDate = ref('')
 
@@ -36,14 +36,14 @@ const statusColors: Record<number, string> = {
 }
 
 const methodOptions = [
-  { label: '全部方式', value: '' },
+  { label: '全部方式', value: 'all' },
   { label: '微信支付', value: 'wechat' },
   { label: '支付宝', value: 'alipay' },
   { label: '易支付', value: 'epay' }
 ]
 
 const statusOptions = [
-  { label: '全部状态', value: '' },
+  { label: '全部状态', value: 'all' },
   { label: '待支付', value: '0' },
   { label: '已支付', value: '1' },
   { label: '支付失败', value: '2' },
@@ -56,8 +56,8 @@ async function fetchOrders() {
     const res = await get('/api/finance/orders', {
       page: page.value,
       order_no: filterOrderNo.value,
-      payment_method: filterMethod.value,
-      payment_status: filterStatus.value,
+      payment_method: filterMethod.value === 'all' ? '' : filterMethod.value,
+      payment_status: filterStatus.value === 'all' ? '' : filterStatus.value,
       start_date: filterStartDate.value,
       end_date: filterEndDate.value
     })

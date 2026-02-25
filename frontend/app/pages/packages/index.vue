@@ -9,7 +9,7 @@ const packages = ref<any[]>([])
 const total = ref(0)
 const page = ref(1)
 const programs = ref<any[]>([])
-const filterProgram = ref('')
+const filterProgram = ref('all')
 
 const showForm = ref(false)
 const editMode = ref(false)
@@ -40,7 +40,7 @@ async function fetchPrograms() {
 async function fetchPackages() {
   loading.value = true
   try {
-    const res = await get('/api/packages', { page: page.value, program_id: filterProgram.value })
+    const res = await get('/api/packages', { page: page.value, program_id: filterProgram.value === 'all' ? '' : filterProgram.value })
     if (res.code === 0) {
       packages.value = res.data.list || []
       total.value = res.data.total
@@ -136,7 +136,7 @@ onMounted(() => {
         <div class="flex items-center justify-between flex-wrap gap-2">
           <span class="font-medium text-gray-900 dark:text-white">套餐管理</span>
           <div class="flex items-center gap-2">
-            <USelect v-model="filterProgram" :items="[{ label: '全部程序', value: '' }, ...programs]" value-key="value" class="w-32" />
+            <USelect v-model="filterProgram" :items="[{ label: '全部程序', value: 'all' }, ...programs]" value-key="value" class="w-32" />
             <UButton variant="outline" color="neutral" @click="fetchPackages">筛选</UButton>
             <UButton @click="openAdd">添加套餐</UButton>
           </div>

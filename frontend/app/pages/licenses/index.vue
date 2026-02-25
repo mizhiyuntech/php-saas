@@ -9,8 +9,8 @@ const licenses = ref<any[]>([])
 const total = ref(0)
 const page = ref(1)
 
-const filterProgramId = ref('')
-const filterStatus = ref('')
+const filterProgramId = ref('all')
+const filterStatus = ref('all')
 const filterKeyword = ref('')
 
 const programs = ref<any[]>([])
@@ -66,8 +66,8 @@ async function fetchLicenses() {
   try {
     const res = await get('/api/licenses', {
       page: page.value,
-      program_id: filterProgramId.value,
-      status: filterStatus.value,
+      program_id: filterProgramId.value === 'all' ? '' : filterProgramId.value,
+      status: filterStatus.value === 'all' ? '' : filterStatus.value,
       keyword: filterKeyword.value
     })
     if (res.code === 0) {
@@ -168,8 +168,8 @@ onMounted(() => {
           <span class="font-medium text-gray-900 dark:text-white">授权码管理</span>
           <div class="flex items-center gap-2 flex-wrap">
             <UInput v-model="filterKeyword" placeholder="搜索授权码/备注" class="w-40" />
-            <USelect v-model="filterProgramId" :items="[{ label: '全部程序', value: '' }, ...programs]" value-key="value" class="w-32" />
-            <USelect v-model="filterStatus" :items="[{ label: '全部状态', value: '' }, ...statusOptions]" value-key="value" class="w-28" />
+            <USelect v-model="filterProgramId" :items="[{ label: '全部程序', value: 'all' }, ...programs]" value-key="value" class="w-32" />
+            <USelect v-model="filterStatus" :items="[{ label: '全部状态', value: 'all' }, ...statusOptions]" value-key="value" class="w-28" />
             <UButton variant="outline" color="neutral" @click="fetchLicenses">搜索</UButton>
             <UButton @click="openCreate">生成授权码</UButton>
           </div>
