@@ -25,14 +25,14 @@ interface PaymentData {
 const paymentConfigs = reactive<Record<string, PaymentData>>({
   wechat: {
     enabled: false,
-    config: { app_id: '', mch_id: '', api_key: '', cert_path: '' },
+    config: { app_id: '', mch_id: '', api_v3_key: '', serial_no: '', private_key: '' },
     return_url: '',
     notify_url: '',
     auth_dir: ''
   },
   alipay: {
     enabled: false,
-    config: { app_id: '', private_key: '', alipay_public_key: '' },
+    config: { app_id: '', private_key: '', alipay_public_key: '', is_prod: true },
     return_url: '',
     notify_url: ''
   },
@@ -114,20 +114,27 @@ onMounted(fetchConfigs)
         </UButton>
       </div>
 
-      <!-- WeChat Pay -->
+      <!-- WeChat Pay V3 -->
       <div v-show="activePayment === 'wechat'" class="space-y-4">
         <div class="flex items-center gap-2">
           <USwitch v-model="paymentConfigs.wechat.enabled" />
           <span class="text-sm text-gray-700 dark:text-gray-300">启用微信支付</span>
         </div>
-        <UFormField label="AppID">
-          <UInput v-model="paymentConfigs.wechat.config.app_id" placeholder="微信AppID" />
+        <UAlert title="微信支付V3" description="使用微信支付V3接口，支持Native扫码支付和H5支付。请在微信支付商户平台获取以下配置信息。" color="info" variant="subtle" />
+        <UFormField label="应用AppID" hint="微信公众号或小程序的AppID">
+          <UInput v-model="paymentConfigs.wechat.config.app_id" placeholder="wx..." />
         </UFormField>
         <UFormField label="商户号 (MchID)">
-          <UInput v-model="paymentConfigs.wechat.config.mch_id" placeholder="微信商户号" />
+          <UInput v-model="paymentConfigs.wechat.config.mch_id" placeholder="微信支付商户号" />
         </UFormField>
-        <UFormField label="API密钥">
-          <UInput v-model="paymentConfigs.wechat.config.api_key" type="password" placeholder="商户API密钥" />
+        <UFormField label="APIv3密钥" hint="在商户平台 > 账户中心 > API安全 中设置">
+          <UInput v-model="paymentConfigs.wechat.config.api_v3_key" type="password" placeholder="32位APIv3密钥" />
+        </UFormField>
+        <UFormField label="证书序列号" hint="在商户平台 > 账户中心 > API安全 > 管理证书 中查看">
+          <UInput v-model="paymentConfigs.wechat.config.serial_no" placeholder="证书序列号" />
+        </UFormField>
+        <UFormField label="商户API私钥" hint="apiclient_key.pem 文件的完整内容">
+          <UTextarea v-model="paymentConfigs.wechat.config.private_key" placeholder="-----BEGIN PRIVATE KEY-----&#10;...&#10;-----END PRIVATE KEY-----" :rows="4" />
         </UFormField>
 
         <div v-if="paymentConfigs.wechat.return_url" class="space-y-2 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
@@ -158,15 +165,20 @@ onMounted(fetchConfigs)
           <USwitch v-model="paymentConfigs.alipay.enabled" />
           <span class="text-sm text-gray-700 dark:text-gray-300">启用支付宝</span>
         </div>
-        <UFormField label="AppID">
-          <UInput v-model="paymentConfigs.alipay.config.app_id" placeholder="支付宝AppID" />
+        <UAlert title="支付宝支付" description="支持电脑网站支付（PC扫码）、手机网站支付（H5）和当面付（扫码）。请在支付宝开放平台获取应用密钥。" color="info" variant="subtle" />
+        <UFormField label="应用AppID" hint="在支付宝开放平台创建应用后获取">
+          <UInput v-model="paymentConfigs.alipay.config.app_id" placeholder="支付宝应用AppID" />
         </UFormField>
-        <UFormField label="应用私钥">
-          <UTextarea v-model="paymentConfigs.alipay.config.private_key" placeholder="RSA2私钥" :rows="3" />
+        <UFormField label="应用私钥（RSA2）" hint="在开放平台设置接口加签方式时生成">
+          <UTextarea v-model="paymentConfigs.alipay.config.private_key" placeholder="MIIEvgIBA..." :rows="4" />
         </UFormField>
-        <UFormField label="支付宝公钥">
-          <UTextarea v-model="paymentConfigs.alipay.config.alipay_public_key" placeholder="支付宝公钥" :rows="3" />
+        <UFormField label="支付宝公钥" hint="设置加签方式后，支付宝提供的公钥">
+          <UTextarea v-model="paymentConfigs.alipay.config.alipay_public_key" placeholder="MIIBIjAN..." :rows="4" />
         </UFormField>
+        <div class="flex items-center gap-2">
+          <USwitch v-model="paymentConfigs.alipay.config.is_prod" />
+          <span class="text-sm text-gray-700 dark:text-gray-300">正式环境（关闭则为沙箱环境）</span>
+        </div>
 
         <div v-if="paymentConfigs.alipay.return_url" class="space-y-2 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
           <p class="text-sm font-medium text-gray-700 dark:text-gray-300">支付相关链接（请复制到支付宝开放平台）</p>

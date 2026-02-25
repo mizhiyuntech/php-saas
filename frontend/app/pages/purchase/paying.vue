@@ -27,10 +27,7 @@ onUnmounted(() => {
 
 async function fetchPayInfo() {
   const orderNo = route.query.order_no as string
-  if (!orderNo) {
-    loading.value = false
-    return
-  }
+  if (!orderNo) { loading.value = false; return }
   try {
     const res = await fetch(`${baseURL}/api/public/pay-info/${orderNo}`)
     const data = await res.json()
@@ -51,16 +48,19 @@ function startPolling() {
     if (payInfo.value?.status === 'paid') {
       polling.value = false
       if (pollTimer) clearInterval(pollTimer)
-      const orderNo = route.query.order_no as string
-      router.replace(`/purchase/result?order_no=${orderNo}`)
+      router.replace(`/purchase/result?order_no=${route.query.order_no}`)
     }
   }, 3000)
 }
 
 function goResult() {
-  const orderNo = route.query.order_no as string
-  router.push(`/purchase/result?order_no=${orderNo}`)
+  router.push(`/purchase/result?order_no=${route.query.order_no}`)
 }
+
+const qrImageUrl = computed(() => {
+  if (!payInfo.value?.qr_code) return ''
+  return `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(payInfo.value.qr_code)}`
+})
 
 const methodLabels: Record<string, string> = {
   wechat: '微信支付',
@@ -110,58 +110,46 @@ const methodLabels: Record<string, string> = {
             </div>
             <div class="flex justify-between border-t border-gray-200 dark:border-gray-700 pt-2">
               <span class="font-medium text-gray-700 dark:text-gray-300">应付金额</span>
-              <span class="text-2xl font-bold text-orange-600">{{ Number(payInfo.amount).toFixed(2) }}</span>
+              <span class="text-2xl font-bold text-orange-600">{{ Number(payInfo.amount).toFixed(2) }} 元</span>
             </div>
           </div>
 
-          <!-- WeChat Pay -->
-          <div v-if="payInfo.payment_method === 'wechat'" class="text-center space-y-4">
-            <div class="p-6 bg-green-50 dark:bg-green-950 rounded-lg">
-              <UIcon name="i-lucide-smartphone" class="w-12 h-12 text-green-600 mx-auto mb-3" />
-              <p class="text-sm font-medium text-green-800 dark:text-green-300 mb-2">微信扫码支付</p>
-              <p class="text-xs text-green-600 dark:text-green-400">请使用微信扫描下方二维码完成支付</p>
-              <div class="mt-4 w-48 h-48 mx-auto bg-white rounded-lg border-2 border-green-200 flex items-center justify-center">
-                <div class="text-center">
-                  <UIcon name="i-lucide-scan" class="w-8 h-8 text-gray-300 mx-auto mb-2" />
-                  <p class="text-xs text-gray-400">请在后台配置微信支付</p>
-                  <p class="text-xs text-gray-400">JSAPI/Native接口</p>
-                </div>
-              </div>
-            </div>
-            <UAlert
-              title="支付步骤"
-              description="1. 打开微信，点击右上角扫一扫  2. 扫描上方二维码  3. 确认支付金额并完成付款  4. 支付成功后页面将自动跳转"
-              color="info"
-              variant="subtle"
-            />
-          </div>
+          <!-- QR Code payment (WeChat / Alipay scan) -->
+          <div class="text-center space-y-4">
+            <div
+              class="p-6 rounded-lg"
+              :class="payInfo.payment_method === 'wechat' ? 'bg-green-50 dark:bg-green-950' : 'bg-blue-50 dark:bg-blue-950'"
+            >
+              <UIcon
+                :name="payInfo.payment_method === 'wechat' ? 'i-lucide-smartphone' : 'i-lucide-wallet'"
+                class="w-10 h-10 mx-auto mb-3"
+                :class="payInfo.payment_method === 'wechat' ? 'text-green-600' : 'text-blue-600'"
+              />
+              <p class="text-sm font-medium mb-3" :class="payInfo.payment_method === 'wechat' ? 'text-green-800 dark:text-green-300' : 'text-blue-800 dark:text-blue-300'">
+                {{ payInfo.payment_method === 'wechat' ? '请使用微信扫描二维码支付' : '请使用支付宝扫描二维码支付' }}
+              </p>
 
-          <!-- Alipay -->
-          <div v-if="payInfo.payment_method === 'alipay'" class="text-center space-y-4">
-            <div class="p-6 bg-blue-50 dark:bg-blue-950 rounded-lg">
-              <UIcon name="i-lucide-wallet" class="w-12 h-12 text-blue-600 mx-auto mb-3" />
-              <p class="text-sm font-medium text-blue-800 dark:text-blue-300 mb-2">支付宝支付</p>
-              <p class="text-xs text-blue-600 dark:text-blue-400">请使用支付宝扫描下方二维码或点击按钮跳转支付</p>
-              <div class="mt-4 w-48 h-48 mx-auto bg-white rounded-lg border-2 border-blue-200 flex items-center justify-center">
-                <div class="text-center">
-                  <UIcon name="i-lucide-scan" class="w-8 h-8 text-gray-300 mx-auto mb-2" />
-                  <p class="text-xs text-gray-400">请在后台配置支付宝</p>
-                  <p class="text-xs text-gray-400">当面付/电脑网站支付接口</p>
+              <!-- QR code from server -->
+              <div v-if="qrImageUrl" class="w-52 h-52 mx-auto bg-white rounded-lg p-2">
+                <img :src="qrImageUrl" alt="支付二维码" class="w-full h-full object-contain" />
+              </div>
+
+              <!-- No QR code available -->
+              <div v-else class="w-52 h-52 mx-auto bg-white rounded-lg border-2 flex items-center justify-center" :class="payInfo.payment_method === 'wechat' ? 'border-green-200' : 'border-blue-200'">
+                <div class="text-center px-4">
+                  <UIcon name="i-lucide-alert-circle" class="w-8 h-8 text-gray-300 mx-auto mb-2" />
+                  <p class="text-xs text-gray-400">{{ payInfo.payment_method === 'wechat' ? '请在后台正确配置微信支付V3密钥' : '请在后台正确配置支付宝应用密钥' }}</p>
                 </div>
               </div>
             </div>
-            <a v-if="payInfo.return_url" :href="payInfo.return_url">
-              <UButton variant="outline" block>使用支付宝网页支付</UButton>
+
+            <!-- Alipay web pay link -->
+            <a v-if="payInfo.payment_method === 'alipay' && payInfo.return_url" :href="payInfo.return_url">
+              <UButton variant="outline" block class="mt-2">使用支付宝网页支付</UButton>
             </a>
-            <UAlert
-              title="支付步骤"
-              description="1. 打开支付宝APP扫描二维码，或点击上方按钮跳转支付宝网页支付  2. 确认支付金额并完成付款  3. 支付成功后页面将自动跳转"
-              color="info"
-              variant="subtle"
-            />
           </div>
 
-          <!-- Polling status -->
+          <!-- Polling indicator -->
           <div class="flex items-center justify-center gap-2 text-sm text-gray-500">
             <div v-if="polling" class="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
             <span>{{ polling ? '正在等待支付结果...' : '支付状态检测已停止' }}</span>
@@ -173,7 +161,7 @@ const methodLabels: Record<string, string> = {
             <NuxtLink to="/purchase">
               <UButton variant="ghost" color="neutral">取消支付</UButton>
             </NuxtLink>
-            <UButton variant="outline" @click="goResult">我已支付</UButton>
+            <UButton variant="outline" @click="goResult">我已完成支付</UButton>
           </div>
         </template>
       </UCard>

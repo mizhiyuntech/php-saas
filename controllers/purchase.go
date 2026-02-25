@@ -7,10 +7,10 @@ import (
 	"net/url"
 	"sort"
 	"strings"
-	"time"
 
 	"yuyue-auth/config"
 	"yuyue-auth/models"
+	"yuyue-auth/services"
 	"yuyue-auth/utils"
 
 	"github.com/gin-gonic/gin"
@@ -69,7 +69,6 @@ func PublicCreateOrder(c *gin.Context) {
 		utils.Error(c, 404, "套餐不存在")
 		return
 	}
-
 	if pkg.Status != 1 {
 		utils.Error(c, 400, "该套餐已下架")
 		return
@@ -102,117 +101,50 @@ func PublicCreateOrder(c *gin.Context) {
 		siteURL = fmt.Sprintf("http://%s", c.Request.Host)
 	}
 
-	payURL := ""
-	payType := ""
+	var payURL string
+	var payType string
+	var qrCode string
+	var errMsg string
 
 	switch req.PaymentMethod {
+	case "alipay":
+		u, err := services.CreateAlipayPagePay(order, siteURL)
+		if err != nil {
+			errMsg = err.Error()
+		} else {
+			payURL = u
+			payType = "redirect"
+		}
+
+	case "wechat":
+		codeURL, err := services.CreateWechatNativePay(order, siteURL)
+		if err != nil {
+			errMsg = err.Error()
+			payURL = siteURL + "/purchase/paying?order_no=" + orderNo
+			payType = "page"
+		} else {
+			qrCode = codeURL
+			payURL = siteURL + "/purchase/paying?order_no=" + orderNo
+			payType = "page"
+			config.DB.Model(&order).Update("trade_no", codeURL)
+		}
+
 	case "epay":
 		payURL = buildEpayURL(pc, order, siteURL)
 		payType = "redirect"
-	case "alipay":
-		payURL = buildAlipayURL(pc, order, siteURL)
-		if payURL != "" {
-			payType = "redirect"
-		} else {
-			payURL = siteURL + "/purchase/paying?order_no=" + orderNo
-			payType = "page"
-		}
-	case "wechat":
-		payURL = siteURL + "/purchase/paying?order_no=" + orderNo
-		payType = "page"
 	}
 
-	utils.Success(c, gin.H{
+	result := gin.H{
 		"order_no": orderNo,
 		"amount":   order.Amount,
 		"pay_url":  payURL,
 		"pay_type": payType,
-	})
-}
-
-func buildAlipayURL(pc models.PaymentConfig, order models.Order, siteURL string) string {
-	var cfg struct {
-		AppID           string `json:"app_id"`
-		PrivateKey      string `json:"private_key"`
-		AlipayPublicKey string `json:"alipay_public_key"`
-		Gateway         string `json:"gateway"`
 	}
-	json.Unmarshal([]byte(pc.Config), &cfg)
-
-	if cfg.AppID == "" {
-		return ""
+	if qrCode != "" {
+		result["qr_code"] = qrCode
 	}
-
-	gateway := cfg.Gateway
-	if gateway == "" {
-		gateway = "https://openapi.alipay.com/gateway.do"
-	}
-
-	params := url.Values{}
-	params.Set("app_id", cfg.AppID)
-	params.Set("method", "alipay.trade.page.pay")
-	params.Set("charset", "utf-8")
-	params.Set("sign_type", "RSA2")
-	params.Set("timestamp", time.Now().Format("2006-01-02 15:04:05"))
-	params.Set("version", "1.0")
-	params.Set("notify_url", siteURL+"/api/payment/callback/alipay/notify")
-	params.Set("return_url", siteURL+"/purchase/result?order_no="+order.OrderNo)
-
-	bizContent := fmt.Sprintf(`{"out_trade_no":"%s","total_amount":"%.2f","subject":"授权套餐-%s","product_code":"FAST_INSTANT_TRADE_PAY"}`,
-		order.OrderNo, order.Amount, order.OrderNo)
-	params.Set("biz_content", bizContent)
-
-	return gateway + "?" + params.Encode()
-}
-
-func PublicGetPayInfo(c *gin.Context) {
-	orderNo := c.Param("order_no")
-	if orderNo == "" {
-		utils.ErrorBad(c, "缺少订单号")
-		return
-	}
-
-	var order models.Order
-	if err := config.DB.Where("order_no = ?", orderNo).Preload("Program").First(&order).Error; err != nil {
-		utils.Error(c, 404, "订单不存在")
-		return
-	}
-
-	if order.PaymentStatus == 1 {
-		utils.Success(c, gin.H{
-			"status": "paid",
-		})
-		return
-	}
-
-	siteURL := models.GetSetting("site_url")
-	if siteURL == "" {
-		siteURL = fmt.Sprintf("http://%s", c.Request.Host)
-	}
-
-	var pc models.PaymentConfig
-	config.DB.Where("payment_type = ? AND enabled = ?", order.PaymentMethod, true).First(&pc)
-
-	var payConfig map[string]interface{}
-	json.Unmarshal([]byte(pc.Config), &payConfig)
-
-	result := gin.H{
-		"order_no":       order.OrderNo,
-		"amount":         order.Amount,
-		"payment_method": order.PaymentMethod,
-		"program_name":   order.Program.Name,
-		"status":         "pending",
-	}
-
-	switch order.PaymentMethod {
-	case "wechat":
-		result["mch_id"] = payConfig["mch_id"]
-		result["notify_url"] = siteURL + "/api/payment/callback/wechat/notify"
-		result["return_url"] = siteURL + "/purchase/result?order_no=" + order.OrderNo
-	case "alipay":
-		result["app_id"] = payConfig["app_id"]
-		result["notify_url"] = siteURL + "/api/payment/callback/alipay/notify"
-		result["return_url"] = siteURL + "/purchase/result?order_no=" + order.OrderNo
+	if errMsg != "" {
+		result["pay_error"] = errMsg
 	}
 
 	utils.Success(c, result)
@@ -236,7 +168,7 @@ func buildEpayURL(pc models.PaymentConfig, order models.Order, siteURL string) s
 		"out_trade_no": order.OrderNo,
 		"notify_url":   siteURL + "/api/payment/callback/epay/notify",
 		"return_url":   siteURL + "/purchase/result?order_no=" + order.OrderNo,
-		"name":         fmt.Sprintf("授权套餐 - 订单%s", order.OrderNo),
+		"name":         fmt.Sprintf("授权套餐 - %s", order.OrderNo),
 		"money":        fmt.Sprintf("%.2f", order.Amount),
 	}
 
@@ -304,15 +236,153 @@ func PublicGetOrder(c *gin.Context) {
 	utils.Success(c, result)
 }
 
+func PublicGetPayInfo(c *gin.Context) {
+	orderNo := c.Param("order_no")
+	if orderNo == "" {
+		utils.ErrorBad(c, "缺少订单号")
+		return
+	}
+
+	var order models.Order
+	if err := config.DB.Where("order_no = ?", orderNo).Preload("Program").First(&order).Error; err != nil {
+		utils.Error(c, 404, "订单不存在")
+		return
+	}
+
+	if order.PaymentStatus == 1 {
+		utils.Success(c, gin.H{"status": "paid"})
+		return
+	}
+
+	siteURL := models.GetSetting("site_url")
+	if siteURL == "" {
+		siteURL = fmt.Sprintf("http://%s", c.Request.Host)
+	}
+
+	result := gin.H{
+		"order_no":       order.OrderNo,
+		"amount":         order.Amount,
+		"payment_method": order.PaymentMethod,
+		"program_name":   order.Program.Name,
+		"status":         "pending",
+		"return_url":     siteURL + "/purchase/result?order_no=" + order.OrderNo,
+	}
+
+	if order.PaymentMethod == "wechat" && order.TradeNo != "" && strings.HasPrefix(order.TradeNo, "weixin://") {
+		result["qr_code"] = order.TradeNo
+	}
+
+	if order.PaymentMethod == "alipay" {
+		qr, err := services.CreateAlipayTradePrecreate(order, siteURL)
+		if err == nil {
+			result["qr_code"] = qr
+		}
+	}
+
+	utils.Success(c, result)
+}
+
 func HandlePaymentCallback(c *gin.Context) {
 	paymentType := c.Param("type")
 	action := c.Param("action")
 
 	switch paymentType {
+	case "alipay":
+		handleAlipayCallback(c, action)
+	case "wechat":
+		handleWechatCallback(c, action)
 	case "epay":
 		handleEpayCallback(c, action)
 	default:
-		handleGenericCallback(c, paymentType, action)
+		c.String(200, "unsupported")
+	}
+}
+
+func handleAlipayCallback(c *gin.Context, action string) {
+	c.Request.ParseForm()
+	orderNo, ok := services.VerifyAlipayNotify(c.Request.Form)
+
+	if ok && orderNo != "" {
+		tradeNo := c.Request.FormValue("trade_no")
+		services.CompleteOrder(orderNo, tradeNo)
+	}
+
+	if action == "notify" {
+		c.String(200, "success")
+	} else {
+		siteURL := models.GetSetting("site_url")
+		if siteURL == "" {
+			siteURL = fmt.Sprintf("http://%s", c.Request.Host)
+		}
+		if orderNo != "" {
+			c.Redirect(302, siteURL+"/purchase/result?order_no="+orderNo)
+		} else {
+			c.Redirect(302, siteURL+"/home")
+		}
+	}
+}
+
+func handleWechatCallback(c *gin.Context, action string) {
+	if action == "notify" {
+		body, _ := c.GetRawData()
+		var notifyData struct {
+			Resource struct {
+				Ciphertext string `json:"ciphertext"`
+			} `json:"resource"`
+		}
+		json.Unmarshal(body, &notifyData)
+
+		var orderNo, tradeNo string
+
+		var pc models.PaymentConfig
+		config.DB.Where("payment_type = 'wechat'").First(&pc)
+		var cfg struct {
+			APIv3Key string `json:"api_v3_key"`
+		}
+		json.Unmarshal([]byte(pc.Config), &cfg)
+
+		if cfg.APIv3Key != "" && notifyData.Resource.Ciphertext != "" {
+			var full struct {
+				Resource struct {
+					Algorithm      string `json:"algorithm"`
+					Ciphertext     string `json:"ciphertext"`
+					AssociatedData string `json:"associated_data"`
+					Nonce          string `json:"nonce"`
+				} `json:"resource"`
+			}
+			json.Unmarshal(body, &full)
+
+			plaintext, err := utils.DecryptAES256GCM(
+				cfg.APIv3Key,
+				full.Resource.Nonce,
+				full.Resource.Ciphertext,
+				full.Resource.AssociatedData,
+			)
+			if err == nil {
+				var payResult struct {
+					OutTradeNo    string `json:"out_trade_no"`
+					TransactionID string `json:"transaction_id"`
+					TradeState    string `json:"trade_state"`
+				}
+				json.Unmarshal([]byte(plaintext), &payResult)
+				if payResult.TradeState == "SUCCESS" {
+					orderNo = payResult.OutTradeNo
+					tradeNo = payResult.TransactionID
+				}
+			}
+		}
+
+		if orderNo != "" {
+			services.CompleteOrder(orderNo, tradeNo)
+		}
+
+		c.JSON(200, gin.H{"code": "SUCCESS", "message": "OK"})
+	} else {
+		siteURL := models.GetSetting("site_url")
+		if siteURL == "" {
+			siteURL = fmt.Sprintf("http://%s", c.Request.Host)
+		}
+		c.Redirect(302, siteURL+"/home")
 	}
 }
 
@@ -365,7 +435,7 @@ func handleEpayCallback(c *gin.Context, action string) {
 	}
 
 	if tradeStatus == "TRADE_SUCCESS" {
-		completeOrder(orderNo, tradeNo)
+		services.CompleteOrder(orderNo, tradeNo)
 	}
 
 	if action == "notify" {
@@ -376,67 +446,6 @@ func handleEpayCallback(c *gin.Context, action string) {
 			siteURL = fmt.Sprintf("http://%s", c.Request.Host)
 		}
 		c.Redirect(302, siteURL+"/purchase/result?order_no="+orderNo)
-	}
-}
-
-func handleGenericCallback(c *gin.Context, paymentType, action string) {
-	orderNo := c.Query("out_trade_no")
-	if orderNo == "" {
-		orderNo = c.PostForm("out_trade_no")
-	}
-	tradeNo := c.Query("trade_no")
-	if tradeNo == "" {
-		tradeNo = c.PostForm("trade_no")
-	}
-
-	if orderNo != "" {
-		completeOrder(orderNo, tradeNo)
-	}
-
-	if action == "notify" {
-		c.String(200, "success")
-	} else {
-		siteURL := models.GetSetting("site_url")
-		if siteURL == "" {
-			siteURL = fmt.Sprintf("http://%s", c.Request.Host)
-		}
-		c.Redirect(302, siteURL+"/purchase/result?order_no="+orderNo)
-	}
-}
-
-func completeOrder(orderNo, tradeNo string) {
-	var order models.Order
-	if err := config.DB.Where("order_no = ? AND payment_status = 0", orderNo).First(&order).Error; err != nil {
-		return
-	}
-
-	var pkg models.Package
-	if order.PackageID != nil {
-		config.DB.First(&pkg, *order.PackageID)
-	}
-
-	var program models.Program
-	config.DB.First(&program, order.ProgramID)
-
-	license := models.License{
-		ProgramID:  order.ProgramID,
-		LicenseKey: utils.GenerateLicenseKey(),
-		Status:     0,
-		Duration:   pkg.Duration,
-		Remark:     fmt.Sprintf("订单购买: %s", orderNo),
-	}
-	config.DB.Create(&license)
-
-	now := time.Now()
-	config.DB.Model(&order).Updates(map[string]interface{}{
-		"payment_status": 1,
-		"trade_no":       tradeNo,
-		"license_id":     license.ID,
-		"paid_at":        now,
-	})
-
-	if order.BuyerEmail != "" {
-		go sendOrderEmail(order.BuyerEmail, orderNo, program.Name, license.LicenseKey, order.Amount)
 	}
 }
 
@@ -488,27 +497,15 @@ func PublicVerifyDomain(c *gin.Context) {
 	}
 
 	var license models.License
-	result := config.DB.Where("device_info LIKE ?", "%"+req.Domain+"%").First(&license)
-	if result.Error == nil && license.Status == 1 {
+	if err := config.DB.Where("device_info LIKE ?", "%"+req.Domain+"%").Where("status = 1").First(&license).Error; err == nil {
+		var program models.Program
+		config.DB.First(&program, license.ProgramID)
 		utils.Success(c, gin.H{
 			"status":       "authorized",
-			"program_name": "",
+			"program_name": program.Name,
 			"license_key":  license.LicenseKey[:8] + "****",
 			"expires_at":   license.ExpiresAt,
 		})
-
-		var program models.Program
-		if config.DB.First(&program, license.ProgramID).Error == nil {
-			c.JSON(200, gin.H{
-				"code": 0, "message": "success",
-				"data": gin.H{
-					"status":       "authorized",
-					"program_name": program.Name,
-					"license_key":  license.LicenseKey[:8] + "****",
-					"expires_at":   license.ExpiresAt,
-				},
-			})
-		}
 		return
 	}
 
@@ -516,44 +513,4 @@ func PublicVerifyDomain(c *gin.Context) {
 		"status":  "unknown",
 		"message": "未查询到该域名的授权信息",
 	})
-}
-
-func sendOrderEmail(to, orderNo, programName, licenseKey string, amount float64) {
-	smtpVal := models.GetSetting("smtp_config")
-	if smtpVal == "" {
-		return
-	}
-
-	var cfg struct {
-		Host     string `json:"host"`
-		Port     int    `json:"port"`
-		User     string `json:"user"`
-		Password string `json:"password"`
-		FromName string `json:"from_name"`
-		SSL      bool   `json:"ssl"`
-	}
-	json.Unmarshal([]byte(smtpVal), &cfg)
-	if cfg.Host == "" || cfg.User == "" {
-		return
-	}
-
-	siteTitle := models.GetSetting("site_title")
-	if siteTitle == "" {
-		siteTitle = "鱼跃授权"
-	}
-
-	subject := fmt.Sprintf("%s - 订单支付成功通知", siteTitle)
-	body := fmt.Sprintf(`<div style="max-width:500px;margin:0 auto;font-family:system-ui,sans-serif;color:#333">
-<h2 style="color:#16a34a;text-align:center">支付成功</h2>
-<div style="background:#f8fafc;padding:20px;border-radius:8px;margin:16px 0">
-<p><b>订单号：</b>%s</p>
-<p><b>程序：</b>%s</p>
-<p><b>金额：</b>%.2f 元</p>
-<p style="margin-top:16px"><b>授权码：</b></p>
-<p style="font-size:18px;font-weight:bold;color:#2563eb;letter-spacing:1px">%s</p>
-</div>
-<p style="font-size:13px;color:#9ca3af;text-align:center">请妥善保存您的授权码 - %s</p>
-</div>`, orderNo, programName, amount, licenseKey, siteTitle)
-
-	utils.SendMail(cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.FromName, cfg.SSL, to, subject, body)
 }
