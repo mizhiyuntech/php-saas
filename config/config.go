@@ -11,12 +11,15 @@ import (
 	"gorm.io/gorm"
 )
 
+const CurrentDBVersion = 2
+
 type AppConfig struct {
 	Installed bool        `json:"installed"`
 	MySQL     MySQLConfig `json:"mysql"`
 	Redis     RedisConfig `json:"redis"`
 	JWTSecret string      `json:"jwt_secret"`
 	Port      int         `json:"port"`
+	DBVersion int         `json:"db_version"`
 }
 
 type MySQLConfig struct {

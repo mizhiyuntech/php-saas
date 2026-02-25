@@ -64,6 +64,7 @@ func Install(c *gin.Context) {
 	cfg := &config.AppConfig{
 		Installed: true,
 		Port:      3132,
+		DBVersion: config.CurrentDBVersion,
 		JWTSecret: utils.GenerateRandomString(32),
 		MySQL: config.MySQLConfig{
 			Host:     req.MySQLHost,

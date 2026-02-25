@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"yuyue-auth/config"
+	"yuyue-auth/models"
 	"yuyue-auth/routes"
 
 	"github.com/gin-gonic/gin"
@@ -27,6 +28,18 @@ func main() {
 			log.Fatalf("Failed to init redis: %v", err)
 		}
 		log.Println("Database and Redis connected")
+
+		if config.Conf.DBVersion < config.CurrentDBVersion {
+			log.Printf("Database version %d -> %d, running migration...", config.Conf.DBVersion, config.CurrentDBVersion)
+			if err := models.AutoMigrate(); err != nil {
+				log.Printf("Migration warning: %v", err)
+			} else {
+				models.InitDefaultSettings()
+				config.Conf.DBVersion = config.CurrentDBVersion
+				config.SaveConfig(config.Conf)
+				log.Println("Database migration completed")
+			}
+		}
 	} else {
 		log.Println("System not installed, visit /install to setup")
 	}
