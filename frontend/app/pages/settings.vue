@@ -7,7 +7,6 @@ useHead({ title: '系统设置' })
 
 const loading = ref(true)
 const saving = ref(false)
-const savingAuth = ref(false)
 
 const form = reactive({
   site_title: '',
@@ -20,21 +19,12 @@ const form = reactive({
   site_favicon: ''
 })
 
-const unauthHTML = ref('')
-const showPreview = ref(false)
-
 async function fetchSettings() {
   loading.value = true
   try {
-    const [settingsRes, authRes] = await Promise.all([
-      get('/api/settings'),
-      get('/api/settings/unauth-page')
-    ])
-    if (settingsRes.code === 0 && settingsRes.data) {
-      Object.assign(form, settingsRes.data)
-    }
-    if (authRes.code === 0 && authRes.data) {
-      unauthHTML.value = authRes.data.html || ''
+    const res = await get('/api/settings')
+    if (res.code === 0 && res.data) {
+      Object.assign(form, res.data)
     }
   } finally {
     loading.value = false
@@ -65,32 +55,13 @@ async function handleSave() {
   }
 }
 
-async function handleSaveAuthPage() {
-  savingAuth.value = true
-  try {
-    const res = await put('/api/settings/unauth-page', { html: unauthHTML.value })
-    if (res.code === 0) {
-      toast.add({ title: '保存成功', color: 'success' })
-    } else {
-      toast.add({ title: res.message, color: 'error' })
-    }
-  } finally {
-    savingAuth.value = false
-  }
-}
-
-function resetAuthPage() {
-  unauthHTML.value = ''
-  toast.add({ title: '已恢复为系统默认页面，请保存', color: 'info' })
-}
-
 async function uploadIcon(event: Event) {
   const input = event.target as HTMLInputElement
   if (!input.files?.length) return
-  const formData = new FormData()
-  formData.append('file', input.files[0])
+  const fd = new FormData()
+  fd.append('file', input.files[0])
   try {
-    const res = await upload('/api/settings/upload-icon', formData)
+    const res = await upload('/api/settings/upload-icon', fd)
     if (res.code === 0) {
       form.site_icon = res.data.url
       settingsStore.siteIcon = res.data.url
@@ -106,10 +77,10 @@ async function uploadIcon(event: Event) {
 async function uploadFavicon(event: Event) {
   const input = event.target as HTMLInputElement
   if (!input.files?.length) return
-  const formData = new FormData()
-  formData.append('file', input.files[0])
+  const fd = new FormData()
+  fd.append('file', input.files[0])
   try {
-    const res = await upload('/api/settings/upload-favicon', formData)
+    const res = await upload('/api/settings/upload-favicon', fd)
     if (res.code === 0) {
       form.site_favicon = res.data.url
       settingsStore.siteFavicon = res.data.url
@@ -210,58 +181,5 @@ onMounted(fetchSettings)
     <div class="flex justify-end">
       <UButton size="lg" :loading="saving" @click="handleSave">保存设置</UButton>
     </div>
-
-    <UCard>
-      <template #header>
-        <div class="flex items-center justify-between">
-          <span class="font-medium text-gray-900 dark:text-white">未授权页面</span>
-          <div class="flex items-center gap-2">
-            <UButton variant="outline" color="neutral" size="xs" @click="showPreview = !showPreview">
-              {{ showPreview ? '编辑' : '预览' }}
-            </UButton>
-            <UButton variant="outline" color="neutral" size="xs" @click="resetAuthPage">
-              恢复默认
-            </UButton>
-          </div>
-        </div>
-      </template>
-
-      <div class="space-y-3">
-        <UAlert
-          title="说明"
-          description="此页面在注入授权SDK后，程序未通过授权校验时展示给用户。留空则使用系统默认页面。支持完整HTML，包含表单字段 _sys_action=activate、_sys_lk（授权码）、_sys_pid（程序ID）、_sys_url（服务器地址）"
-          color="info"
-          variant="subtle"
-        />
-
-        <template v-if="showPreview">
-          <div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
-            <iframe
-              v-if="unauthHTML"
-              :srcdoc="unauthHTML"
-              class="w-full h-96 bg-white"
-              sandbox="allow-forms"
-            />
-            <div v-else class="h-96 flex items-center justify-center text-sm text-gray-400 bg-gray-50 dark:bg-gray-800">
-              当前使用系统默认页面
-            </div>
-          </div>
-        </template>
-        <template v-else>
-          <UTextarea
-            v-model="unauthHTML"
-            placeholder="留空使用系统默认页面，或输入自定义HTML..."
-            :rows="14"
-            class="font-mono text-xs"
-          />
-        </template>
-      </div>
-
-      <template #footer>
-        <div class="flex justify-end">
-          <UButton :loading="savingAuth" @click="handleSaveAuthPage">保存未授权页面</UButton>
-        </div>
-      </template>
-    </UCard>
   </div>
 </template>

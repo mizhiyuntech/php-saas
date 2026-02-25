@@ -10,12 +10,15 @@ onMounted(async () => {
   }
 })
 
-useHead({
-  titleTemplate: (title) => {
+useHead(() => ({
+  titleTemplate: (title?: string) => {
     const siteTitle = settingsStore.siteTitle || '鱼跃授权'
     return title ? `${title} - ${siteTitle}` : siteTitle
-  }
-})
+  },
+  link: settingsStore.siteFavicon
+    ? [{ rel: 'icon', type: 'image/x-icon', href: settingsStore.siteFavicon }]
+    : []
+}))
 </script>
 
 <template>

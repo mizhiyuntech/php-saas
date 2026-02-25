@@ -14,6 +14,16 @@ const menuItems = [
   { id: 'programs', label: '程序管理', icon: 'i-lucide-box', path: '/programs' },
   { id: 'licenses', label: '授权管理', icon: 'i-lucide-key-round', path: '/licenses' },
   { id: 'injection', label: '在线注入', icon: 'i-lucide-upload', path: '/injection' },
+  { id: 'piracy', label: '盗版管理', icon: 'i-lucide-shield-alert', path: '/piracy' },
+  {
+    id: 'pages',
+    label: '页面管理',
+    icon: 'i-lucide-file-text',
+    children: [
+      { id: 'pages-unauth', label: '授权验证页面', icon: 'i-lucide-lock', path: '/pages-manage/unauth' },
+      { id: 'pages-piracy', label: '盗版提示页面', icon: 'i-lucide-shield-x', path: '/pages-manage/piracy' }
+    ]
+  },
   {
     id: 'finance',
     label: '财务管理',
@@ -26,7 +36,7 @@ const menuItems = [
   { id: 'settings', label: '系统设置', icon: 'i-lucide-settings', path: '/settings' }
 ]
 
-const expandedGroups = ref<string[]>(['finance'])
+const expandedGroups = ref<string[]>(['finance', 'pages'])
 
 function toggleGroup(id: string) {
   if (sidebarCollapsed.value) {
@@ -303,7 +313,7 @@ watch(() => route.path, (newPath) => {
           <span>{{ tab.title }}</span>
           <span
             v-if="tab.closable"
-            class="ml-1 w-4 h-4 flex items-center justify-center rounded hover:bg-gray-200 dark:hover:bg-gray-700 opacity-0 group-hover:opacity-100 transition-opacity"
+            class="ml-1 w-4 h-4 flex items-center justify-center rounded hover:bg-gray-200 dark:hover:bg-gray-700"
             @click.stop="closeTab(tab.id)"
           >
             <UIcon name="i-lucide-x" class="w-3 h-3" />

@@ -15,6 +15,7 @@ func Setup(r *gin.Engine) {
 
 	api.GET("/site-info", controllers.GetSiteInfo)
 	api.POST("/license/verify", controllers.VerifyLicense)
+	api.POST("/piracy/check", controllers.CheckPiracy)
 
 	api.POST("/payment/callback/:type/:action", controllers.PaymentCallback)
 
@@ -58,5 +59,12 @@ func Setup(r *gin.Engine) {
 		admin.POST("/settings/upload-favicon", controllers.UploadFavicon)
 		admin.GET("/settings/unauth-page", controllers.GetUnauthPageHTML)
 		admin.PUT("/settings/unauth-page", controllers.UpdateUnauthPageHTML)
+		admin.GET("/settings/piracy-page", controllers.GetPiracyPageHTML)
+		admin.PUT("/settings/piracy-page", controllers.UpdatePiracyPageHTML)
+
+		admin.GET("/piracy", controllers.ListPiracy)
+		admin.POST("/piracy", controllers.CreatePiracy)
+		admin.PUT("/piracy/:id", controllers.UpdatePiracy)
+		admin.DELETE("/piracy/:id", controllers.DeletePiracy)
 	}
 }

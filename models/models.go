@@ -75,6 +75,16 @@ type PaymentConfig struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+type PiracyRecord struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	Domain    string    `gorm:"size:255;not null" json:"domain"`
+	IP        string    `gorm:"size:50" json:"ip"`
+	Message   string    `gorm:"size:500;not null" json:"message"`
+	Status    int       `gorm:"default:1" json:"status"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 func AutoMigrate() error {
 	return config.DB.AutoMigrate(
 		&Admin{},
@@ -83,6 +93,7 @@ func AutoMigrate() error {
 		&Order{},
 		&Setting{},
 		&PaymentConfig{},
+		&PiracyRecord{},
 	)
 }
 
@@ -97,6 +108,7 @@ func InitDefaultSettings() error {
 		{Group: "system", Key: "site_favicon", Value: ""},
 		{Group: "system", Key: "site_url", Value: ""},
 		{Group: "system", Key: "unauth_page_html", Value: ""},
+		{Group: "system", Key: "piracy_page_html", Value: ""},
 	}
 
 	for _, s := range defaults {
