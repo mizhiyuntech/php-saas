@@ -102,22 +102,120 @@ func PublicCreateOrder(c *gin.Context) {
 		siteURL = fmt.Sprintf("http://%s", c.Request.Host)
 	}
 
-	var payURL string
+	payURL := ""
+	payType := ""
 
 	switch req.PaymentMethod {
 	case "epay":
 		payURL = buildEpayURL(pc, order, siteURL)
+		payType = "redirect"
 	case "alipay":
-		payURL = fmt.Sprintf("%s/purchase/paying?order_no=%s", siteURL, orderNo)
+		payURL = buildAlipayURL(pc, order, siteURL)
+		if payURL != "" {
+			payType = "redirect"
+		} else {
+			payURL = siteURL + "/purchase/paying?order_no=" + orderNo
+			payType = "page"
+		}
 	case "wechat":
-		payURL = fmt.Sprintf("%s/purchase/paying?order_no=%s", siteURL, orderNo)
+		payURL = siteURL + "/purchase/paying?order_no=" + orderNo
+		payType = "page"
 	}
 
 	utils.Success(c, gin.H{
 		"order_no": orderNo,
 		"amount":   order.Amount,
 		"pay_url":  payURL,
+		"pay_type": payType,
 	})
+}
+
+func buildAlipayURL(pc models.PaymentConfig, order models.Order, siteURL string) string {
+	var cfg struct {
+		AppID           string `json:"app_id"`
+		PrivateKey      string `json:"private_key"`
+		AlipayPublicKey string `json:"alipay_public_key"`
+		Gateway         string `json:"gateway"`
+	}
+	json.Unmarshal([]byte(pc.Config), &cfg)
+
+	if cfg.AppID == "" {
+		return ""
+	}
+
+	gateway := cfg.Gateway
+	if gateway == "" {
+		gateway = "https://openapi.alipay.com/gateway.do"
+	}
+
+	params := url.Values{}
+	params.Set("app_id", cfg.AppID)
+	params.Set("method", "alipay.trade.page.pay")
+	params.Set("charset", "utf-8")
+	params.Set("sign_type", "RSA2")
+	params.Set("timestamp", time.Now().Format("2006-01-02 15:04:05"))
+	params.Set("version", "1.0")
+	params.Set("notify_url", siteURL+"/api/payment/callback/alipay/notify")
+	params.Set("return_url", siteURL+"/purchase/result?order_no="+order.OrderNo)
+
+	bizContent := fmt.Sprintf(`{"out_trade_no":"%s","total_amount":"%.2f","subject":"授权套餐-%s","product_code":"FAST_INSTANT_TRADE_PAY"}`,
+		order.OrderNo, order.Amount, order.OrderNo)
+	params.Set("biz_content", bizContent)
+
+	return gateway + "?" + params.Encode()
+}
+
+func PublicGetPayInfo(c *gin.Context) {
+	orderNo := c.Param("order_no")
+	if orderNo == "" {
+		utils.ErrorBad(c, "缺少订单号")
+		return
+	}
+
+	var order models.Order
+	if err := config.DB.Where("order_no = ?", orderNo).Preload("Program").First(&order).Error; err != nil {
+		utils.Error(c, 404, "订单不存在")
+		return
+	}
+
+	if order.PaymentStatus == 1 {
+		utils.Success(c, gin.H{
+			"status": "paid",
+		})
+		return
+	}
+
+	siteURL := models.GetSetting("site_url")
+	if siteURL == "" {
+		siteURL = fmt.Sprintf("http://%s", c.Request.Host)
+	}
+
+	var pc models.PaymentConfig
+	config.DB.Where("payment_type = ? AND enabled = ?", order.PaymentMethod, true).First(&pc)
+
+	var payConfig map[string]interface{}
+	json.Unmarshal([]byte(pc.Config), &payConfig)
+
+	result := gin.H{
+		"order_no":       order.OrderNo,
+		"amount":         order.Amount,
+		"payment_method": order.PaymentMethod,
+		"program_name":   order.Program.Name,
+		"status":         "pending",
+	}
+
+	switch order.PaymentMethod {
+	case "wechat":
+		result["mch_id"] = payConfig["mch_id"]
+		result["notify_url"] = siteURL + "/api/payment/callback/wechat/notify"
+		result["return_url"] = siteURL + "/purchase/result?order_no=" + order.OrderNo
+	case "alipay":
+		result["app_id"] = payConfig["app_id"]
+		result["notify_url"] = siteURL + "/api/payment/callback/alipay/notify"
+		result["return_url"] = siteURL + "/purchase/result?order_no=" + order.OrderNo
+	}
+
+	utils.Success(c, result)
 }
 
 func buildEpayURL(pc models.PaymentConfig, order models.Order, siteURL string) string {

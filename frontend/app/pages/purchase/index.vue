@@ -84,8 +84,10 @@ async function handlePay() {
 
     if (res.code === 0) {
       orderResult.value = res.data
-      if (res.data.pay_url) {
+      if (res.data.pay_url && res.data.pay_type === 'redirect') {
         window.location.href = res.data.pay_url
+      } else if (res.data.pay_url) {
+        navigateTo(res.data.pay_url.replace(/^https?:\/\/[^/]+/, ''))
       } else {
         step.value = 4
       }
